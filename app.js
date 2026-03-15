@@ -141,7 +141,7 @@ const githubApi = {
     const data = await res.json();
     if (!Array.isArray(data)) return [];
     return data
-      .filter(f => f.name.endsWith('.json'))
+      .filter(f => /^\d{4}-\d{2}-\d{2}_/.test(f.name))
       .map(f => ({
         name: f.name,
         sha: f.sha,
