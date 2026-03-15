@@ -1,6 +1,6 @@
 /* Service Worker — Asset Tracker PWA */
 
-const CACHE = 'asset-tracker-v2';
+const CACHE = 'asset-tracker-v3';
 const APP_SHELL = [
   './',
   './index.html',
@@ -8,6 +8,9 @@ const APP_SHELL = [
   './app.js',
   './manifest.json',
   './icon.svg',
+  './icon-180.png',
+  './icon-192.png',
+  './icon-512.png',
   'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js',
 ];
 
