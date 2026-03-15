@@ -54,7 +54,8 @@ body {
 
 .screen {
   min-height: 100vh;
-  padding-bottom: 100px;
+  min-height: 100dvh;
+  padding-bottom: calc(100px + env(safe-area-inset-bottom));
 }
 
 .hidden { display: none !important; }
@@ -64,7 +65,7 @@ body {
    ============================================ */
 
 .setup-container {
-  padding: 60px 24px 40px;
+  padding: calc(60px + env(safe-area-inset-top)) 24px calc(40px + env(safe-area-inset-bottom));
   max-width: 400px;
   margin: 0 auto;
 }
@@ -238,7 +239,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 16px 12px;
+  padding: calc(16px + env(safe-area-inset-top)) 16px 12px;
   background: var(--bg);
   position: sticky;
   top: 0;
@@ -496,7 +497,7 @@ body {
   transform: translateX(-50%);
   width: 100%;
   max-width: 480px;
-  padding: 12px 16px 28px;
+  padding: 12px 16px calc(24px + env(safe-area-inset-bottom));
   background: linear-gradient(to top, var(--bg) 70%, transparent);
 }
 
