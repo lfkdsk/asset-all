@@ -151,10 +151,12 @@ const githubApi = {
       .sort((a, b) => a.date.localeCompare(b.date));
   },
 
-  async fetchSnapshot(downloadUrl) {
-    const res = await fetch(downloadUrl);
-    if (!res.ok) throw new Error('Failed to fetch snapshot');
-    return res.json();
+  async fetchSnapshot(cfg, filename) {
+    const url = `${this.baseUrl(cfg)}/contents/snapshots/${filename}`;
+    const res = await fetch(url, { headers: this.headers(cfg.token) });
+    if (!res.ok) throw new Error(`Failed to fetch snapshot: ${res.status}`);
+    const data = await res.json();
+    return JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\s/g, '')))));
   },
 
   async saveSnapshot(cfg, snapshotJson) {
@@ -545,7 +547,7 @@ async function loadData() {
     // Load only the latest full snapshot (for current items)
     if (snapshotMeta.length > 0) {
       const latest = snapshotMeta[snapshotMeta.length - 1];
-      const latestSnapshot = await githubApi.fetchSnapshot(latest.downloadUrl);
+      const latestSnapshot = await githubApi.fetchSnapshot(state.config, latest.name);
       state.snapshotData = [latestSnapshot];
       state.currentItems = latestSnapshot.items.map(i => ({ ...i }));
       state.savedItems = latestSnapshot.items.map(i => ({ ...i }));
