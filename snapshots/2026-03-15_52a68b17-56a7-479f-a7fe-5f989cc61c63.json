@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "52a68b17-56a7-479f-a7fe-5f989cc61c63",
+  "snapshotDate": "2026-03-15",
+  "createdAt": "2026-03-15T16:13:37.588Z",
+  "baseCurrency": "CNY",
+  "items": [
+    {
+      "assetId": "6a302ae5-d9e6-4ea7-900b-57360a662e4e",
+      "assetName": "招商银行",
+      "category": "现金",
+      "currency": "CNY",
+      "amount": 1390820,
+      "fxRateToBase": 1,
+      "valueInBase": 1390820
+    }
+  ],
+  "totalInBase": 1390820
+}
