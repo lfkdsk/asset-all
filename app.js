@@ -457,9 +457,9 @@ function renderTrendChart() {
     state.trendChart.destroy();
   }
 
-  const gradient = ctx.createLinearGradient(0, 0, 0, 150);
-  gradient.addColorStop(0, 'rgba(0,122,255,0.2)');
-  gradient.addColorStop(1, 'rgba(0,122,255,0)');
+  const gradient = ctx.createLinearGradient(0, 0, 0, 160);
+  gradient.addColorStop(0, 'rgba(10,132,255,0.25)');
+  gradient.addColorStop(1, 'rgba(10,132,255,0)');
 
   state.trendChart = new Chart(ctx, {
     type: 'line',
@@ -467,15 +467,15 @@ function renderTrendChart() {
       labels,
       datasets: [{
         data: values,
-        borderColor: '#007AFF',
+        borderColor: '#0A84FF',
         borderWidth: 2.5,
         backgroundColor: gradient,
         fill: true,
         tension: 0.4,
         pointRadius: values.length > 20 ? 0 : 4,
         pointHoverRadius: 6,
-        pointBackgroundColor: '#007AFF',
-        pointBorderColor: '#fff',
+        pointBackgroundColor: '#0A84FF',
+        pointBorderColor: '#1C1C1E',
         pointBorderWidth: 2,
       }],
     },
@@ -486,6 +486,12 @@ function renderTrendChart() {
       plugins: {
         legend: { display: false },
         tooltip: {
+          backgroundColor: 'rgba(44,44,46,0.95)',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          titleColor: 'rgba(235,235,245,0.6)',
+          bodyColor: '#FFFFFF',
+          padding: 10,
           callbacks: {
             label: ctx => formatAmount(ctx.raw, base),
           },
@@ -494,12 +500,13 @@ function renderTrendChart() {
       scales: {
         x: {
           grid: { display: false },
-          ticks: { color: '#8E8E93', font: { size: 11 }, maxTicksLimit: 6 },
+          ticks: { color: 'rgba(235,235,245,0.4)', font: { size: 11 }, maxTicksLimit: 6 },
+          border: { display: false },
         },
         y: {
-          grid: { color: 'rgba(0,0,0,0.05)' },
+          grid: { color: 'rgba(255,255,255,0.05)' },
           ticks: {
-            color: '#8E8E93',
+            color: 'rgba(235,235,245,0.4)',
             font: { size: 11 },
             callback: v => formatAmountCompact(v, base),
           },
