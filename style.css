@@ -836,3 +836,111 @@ body {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+/* ============================================
+   Responsive: Tablet / iPad (≥768px) — dual-column
+   ============================================ */
+
+@media (min-width: 768px) {
+  body {
+    max-width: 1200px;
+  }
+
+  /* No more fixed bottom button — no need for bottom padding */
+  .screen {
+    padding-bottom: 0;
+  }
+
+  /* Two-column grid for dashboard content */
+  #dashboard-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto 1fr auto;
+    padding: 0 8px;
+    align-items: start;
+  }
+
+  /* Loading state spans both columns */
+  #dashboard-loading {
+    grid-column: 1 / -1;
+  }
+
+  /* Left column: total card + trend chart */
+  .total-card {
+    grid-column: 1;
+    grid-row: 1;
+    margin: 0 8px 16px;
+  }
+
+  .chart-card {
+    grid-column: 1;
+    grid-row: 2;
+    margin: 0 8px 16px;
+  }
+
+  /* Right column: category breakdown + asset list + save button */
+  #category-card {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0 8px 16px;
+  }
+
+  .assets-card {
+    grid-column: 2;
+    grid-row: 2 / 4;
+    margin: 0 8px 16px;
+  }
+
+  /* Save button: leave fixed positioning, become part of layout flow */
+  #bottom-action {
+    grid-column: 2;
+    grid-row: 4;
+    position: static;
+    transform: none;
+    width: auto;
+    max-width: none;
+    background: none;
+    padding: 0 8px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  /* Modal: centered dialog instead of bottom sheet */
+  .modal-sheet {
+    bottom: auto;
+    top: 50%;
+    left: 50%;
+    right: auto;
+    transform: translate(-50%, -50%);
+    width: min(520px, 90vw);
+    border-radius: var(--radius-lg);
+    max-height: 85vh;
+    animation: modalFadeIn 0.25s ease;
+  }
+
+  @keyframes modalFadeIn {
+    from { opacity: 0; transform: translate(-50%, -48%); }
+    to   { opacity: 1; transform: translate(-50%, -50%); }
+  }
+}
+
+/* ============================================
+   Responsive: Desktop / Mac (≥1024px)
+   ============================================ */
+
+@media (min-width: 1024px) {
+  #dashboard-content {
+    padding: 0 16px;
+  }
+
+  .total-card,
+  .chart-card,
+  #category-card,
+  .assets-card,
+  #bottom-action {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+
+  .chart-wrapper {
+    height: 220px;
+  }
+}
