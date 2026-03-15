@@ -49,7 +49,8 @@ const state = {
   config: null,           // { token, owner, repo, branch, baseCurrency }
   exchangeRates: null,    // { base, date, rates: {} }
   snapshotMeta: [],       // array of { name, sha, date, downloadUrl }
-  snapshotData: [],       // array of loaded snapshot JSON objects (for chart)
+  snapshotIndex: [],      // lightweight manifest: [{date, totalInBase, baseCurrency, filename}]
+  snapshotData: [],       // only the latest full snapshot (for items)
   currentItems: [],       // current working items (editable)
   savedItems: [],         // items from the latest saved snapshot
   isDirty: false,
@@ -179,6 +180,46 @@ const githubApi = {
     return res.json();
   },
 
+  async fetchIndex(cfg) {
+    const url = `${this.baseUrl(cfg)}/contents/snapshots/index.json`;
+    const res = await fetch(url, { headers: this.headers(cfg.token) });
+    if (res.status === 404) return [];
+    if (!res.ok) return [];
+    const data = await res.json();
+    try {
+      const json = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\s/g, '')))));
+      return Array.isArray(json) ? json : [];
+    } catch { return []; }
+  },
+
+  async saveIndex(cfg, indexData, existingSha) {
+    const url = `${this.baseUrl(cfg)}/contents/snapshots/index.json`;
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(indexData, null, 2))));
+    const body = {
+      message: 'chore: update snapshot index',
+      content,
+      branch: cfg.branch || 'main',
+    };
+    if (existingSha) body.sha = existingSha;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { ...this.headers(cfg.token), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.warn('Failed to update index.json:', err.message);
+    }
+  },
+
+  async getIndexSha(cfg) {
+    const url = `${this.baseUrl(cfg)}/contents/snapshots/index.json`;
+    const res = await fetch(url, { headers: this.headers(cfg.token) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.sha || null;
+  },
+
   async testConnection(cfg) {
     const url = `${this.baseUrl(cfg)}`;
     const res = await fetch(url, { headers: this.headers(cfg.token) });
@@ -273,19 +314,16 @@ function renderTotalCard() {
 
   // Change vs previous snapshot
   const changeEl = document.getElementById('total-change');
-  if (snapshotData.length >= 2) {
-    const prev = snapshotData[snapshotData.length - 2];
-    // Re-compute prev total in current base currency
-    let prevTotal = 0;
-    if (exchangeRates && prev.items) {
-      prevTotal = prev.items.reduce((sum, item) => {
-        const val = item.currency === base
-          ? item.amount
-          : item.amount / (exchangeRates.rates[item.currency] || 1);
-        return sum + val;
-      }, 0);
-    } else {
-      prevTotal = prev.totalInBase || 0;
+  if (state.snapshotIndex.length >= 2) {
+    const prev = state.snapshotIndex[state.snapshotIndex.length - 2];
+    let prevTotal = prev.totalInBase || 0;
+    if (exchangeRates && prev.baseCurrency && prev.baseCurrency !== base) {
+      if (prev.baseCurrency === exchangeRates.base) {
+        prevTotal = prev.totalInBase * (exchangeRates.rates[base] || 1);
+      } else {
+        const toExBase = prev.totalInBase / (exchangeRates.rates[prev.baseCurrency] || 1);
+        prevTotal = toExBase * (exchangeRates.rates[base] || 1);
+      }
     }
     const diff = total - prevTotal;
     const pct = prevTotal > 0 ? ((diff / prevTotal) * 100).toFixed(2) : 0;
@@ -379,12 +417,12 @@ function renderCategoryBreakdown() {
 }
 
 function renderTrendChart() {
-  const { snapshotData, exchangeRates, config } = state;
+  const { snapshotIndex, exchangeRates, config } = state;
   const base = config ? config.baseCurrency : 'CNY';
 
   const noDataEl = document.getElementById('chart-no-data');
 
-  if (snapshotData.length < 1) {
+  if (snapshotIndex.length < 1) {
     noDataEl.classList.remove('hidden');
     return;
   }
@@ -393,21 +431,19 @@ function renderTrendChart() {
   const labels = [];
   const values = [];
 
-  for (const snap of snapshotData) {
-    labels.push(snap.snapshotDate.slice(5)); // MM-DD
-    // Recompute total in current base currency
-    let total = 0;
-    if (snap.baseCurrency === base) {
-      total = snap.totalInBase;
-    } else if (exchangeRates && snap.items) {
-      total = snap.items.reduce((sum, item) => {
-        const val = item.currency === base
-          ? item.amount
-          : item.amount / (exchangeRates.rates[item.currency] || 1);
-        return sum + val;
-      }, 0);
-    } else {
-      total = snap.totalInBase;
+  for (const entry of snapshotIndex) {
+    labels.push(entry.date.slice(5)); // MM-DD
+    // Convert stored totalInBase to current base currency if different
+    let total = entry.totalInBase;
+    if (exchangeRates && entry.baseCurrency && entry.baseCurrency !== base) {
+      // entry.totalInBase is in entry.baseCurrency; convert to current base
+      if (entry.baseCurrency === exchangeRates.base) {
+        total = entry.totalInBase * (exchangeRates.rates[base] || 1);
+      } else {
+        // Convert via intermediate: entry.baseCurrency → exchangeRates.base → current base
+        const toExBase = entry.totalInBase / (exchangeRates.rates[entry.baseCurrency] || 1);
+        total = toExBase * (exchangeRates.rates[base] || 1);
+      }
     }
     values.push(total);
   }
@@ -491,31 +527,30 @@ function renderAll() {
 async function loadData() {
   setLoading(true);
   try {
-    const [snapshotMeta, rates] = await Promise.all([
+    // Parallel: fetch snapshot list, exchange rates, and index.json manifest
+    const [snapshotMeta, rates, snapshotIndex] = await Promise.all([
       githubApi.listSnapshots(state.config),
       fxApi.fetchRates(state.config.baseCurrency),
+      githubApi.fetchIndex(state.config),
     ]);
 
     state.snapshotMeta = snapshotMeta;
     state.exchangeRates = rates;
+    state.snapshotIndex = snapshotIndex;
 
     // Update FX date in settings
     const fxDateEl = document.getElementById('fx-rate-date');
     if (fxDateEl) fxDateEl.textContent = `汇率日期：${rates.date}`;
 
-    // Load snapshot data for chart (load all, but limit to last 100)
-    const toLoad = snapshotMeta.slice(-100);
-    const snapshots = await Promise.all(
-      toLoad.map(m => githubApi.fetchSnapshot(m.downloadUrl).catch(() => null))
-    );
-    state.snapshotData = snapshots.filter(Boolean);
-
-    // Set current items from latest snapshot
-    if (state.snapshotData.length > 0) {
-      const latest = state.snapshotData[state.snapshotData.length - 1];
-      state.currentItems = latest.items.map(i => ({ ...i }));
-      state.savedItems = latest.items.map(i => ({ ...i }));
+    // Load only the latest full snapshot (for current items)
+    if (snapshotMeta.length > 0) {
+      const latest = snapshotMeta[snapshotMeta.length - 1];
+      const latestSnapshot = await githubApi.fetchSnapshot(latest.downloadUrl);
+      state.snapshotData = [latestSnapshot];
+      state.currentItems = latestSnapshot.items.map(i => ({ ...i }));
+      state.savedItems = latestSnapshot.items.map(i => ({ ...i }));
     } else {
+      state.snapshotData = [];
       state.currentItems = [];
       state.savedItems = [];
     }
@@ -572,10 +607,27 @@ async function saveSnapshot() {
 
   try {
     const snapshot = buildSnapshot(state.currentItems, state.config.baseCurrency, state.exchangeRates);
-    await githubApi.saveSnapshot(state.config, snapshot);
+    const filename = `${snapshot.snapshotDate}_${snapshot.id}.json`;
 
+    // Save snapshot + get current index SHA in parallel
+    const [, indexSha] = await Promise.all([
+      githubApi.saveSnapshot(state.config, snapshot),
+      githubApi.getIndexSha(state.config),
+    ]);
+
+    // Update lightweight index.json manifest
+    const newEntry = {
+      date: snapshot.snapshotDate,
+      totalInBase: snapshot.totalInBase,
+      baseCurrency: snapshot.baseCurrency,
+      filename,
+    };
+    const updatedIndex = [...state.snapshotIndex, newEntry];
+    await githubApi.saveIndex(state.config, updatedIndex, indexSha);
+
+    state.snapshotIndex = updatedIndex;
     state.savedItems = state.currentItems.map(i => ({ ...i }));
-    state.snapshotData.push(snapshot);
+    state.snapshotData = [snapshot];
     state.isDirty = false;
 
     showToast('快照已保存 ✓');
