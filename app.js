@@ -449,7 +449,7 @@ function renderAssetList() {
     const fallback = CATEGORY_ICONS[item.category] || '💼';
     const domain = getInstitutionDomain(item.assetName);
     const iconHtml = domain
-      ? `<img class="asset-logo" src="https://logo.clearbit.com/${domain}" alt="" onerror="this.outerHTML='<span>${fallback}</span>'">`
+      ? `<img class="asset-logo" src="https://icon.horse/icon/${domain}" alt="" onerror="this.outerHTML='<span>${fallback}</span>'">`
       : `<span>${fallback}</span>`;
     let valueInBase = item.amount;
     if (exchangeRates && item.currency !== base) {
