@@ -46,7 +46,7 @@ const CATEGORY_ICONS = {
 // ─── State ────────────────────────────────────────────────────────────────────
 
 const state = {
-  config: null,           // { token, owner, repo, branch, baseCurrency, workerUrl, workerApiKey }
+  config: null,           // { token, owner, repo, branch, baseCurrency }
   exchangeRates: null,    // { base, date, rates: {} }
   snapshotMeta: [],       // array of { name, sha, date, downloadUrl }
   snapshotIndex: [],      // lightweight manifest: [{date, totalInBase, baseCurrency, filename}]
@@ -55,7 +55,7 @@ const state = {
   savedItems: [],         // items from the latest saved snapshot
   isDirty: false,
   trendChart: null,
-  plaidAccounts: [],      // cached Plaid account list: [{account_id, item_id, institution_name, name, type, balance, currency}]
+  isOffline: false,       // true when using localStorage cache instead of GitHub
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -261,108 +261,32 @@ const fxApi = {
   },
 };
 
-// ─── Plaid API (via Cloudflare Worker proxy) ──────────────────────────────────
+// ─── Local Cache ──────────────────────────────────────────────────────────────
 
-const plaidApi = {
-  headers(cfg) {
-    return {
-      'Content-Type': 'application/json',
-      'X-Api-Key': cfg.workerApiKey || '',
-    };
-  },
+const CACHE_KEY = 'asset_tracker_cache';
 
-  async createLinkToken(cfg) {
-    const res = await fetch(`${cfg.workerUrl}/link-token`, {
-      method: 'POST',
-      headers: this.headers(cfg),
-    });
-    if (!res.ok) throw new Error(`Worker error: ${res.status}`);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    return data.link_token;
-  },
-
-  async exchangeToken(cfg, publicToken, institution) {
-    const res = await fetch(`${cfg.workerUrl}/exchange`, {
-      method: 'POST',
-      headers: this.headers(cfg),
-      body: JSON.stringify({ public_token: publicToken, institution }),
-    });
-    if (!res.ok) throw new Error(`Worker error: ${res.status}`);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    return data;
-  },
-
-  async fetchAccounts(cfg) {
-    const res = await fetch(`${cfg.workerUrl}/accounts`, {
-      headers: this.headers(cfg),
-    });
-    if (!res.ok) throw new Error(`Worker error: ${res.status}`);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    return data;
-  },
-
-  async fetchItems(cfg) {
-    const res = await fetch(`${cfg.workerUrl}/items`, {
-      headers: this.headers(cfg),
-    });
-    if (!res.ok) throw new Error(`Worker error: ${res.status}`);
-    return res.json();
-  },
-
-  async removeItem(cfg, itemId) {
-    const res = await fetch(`${cfg.workerUrl}/item/${encodeURIComponent(itemId)}`, {
-      method: 'DELETE',
-      headers: this.headers(cfg),
-    });
-    if (!res.ok) throw new Error(`Worker error: ${res.status}`);
-    return res.json();
-  },
-};
-
-// ─── Plaid Sync ───────────────────────────────────────────────────────────────
-
-async function syncPlaidBalances(silent = false) {
-  const cfg = state.config;
-  if (!cfg?.workerUrl || !cfg?.workerApiKey) return;
-
-  if (!silent) showToast('正在同步账户余额…', 60000);
-
+function saveLocalCache(items, snapshotIndex, baseCurrency) {
   try {
-    const accounts = await plaidApi.fetchAccounts(cfg);
-    state.plaidAccounts = accounts.filter(a => !a.error);
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      items,
+      snapshotIndex,
+      baseCurrency,
+      cachedAt: new Date().toISOString(),
+    }));
+  } catch (_) { /* storage full or unavailable — ignore */ }
+}
 
-    // Render the accounts list in settings if panel is open
-    renderPlaidAccountsList();
+function loadLocalCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
 
-    // Update any asset items linked to Plaid accounts
-    const now = new Date().toISOString();
-    let changed = false;
-
-    for (const item of state.currentItems) {
-      if (!item.plaidAccountId) continue;
-      const account = state.plaidAccounts.find(a => a.account_id === item.plaidAccountId);
-      if (!account) continue;
-      if (account.balance !== item.amount || account.currency !== item.currency) {
-        item.amount = account.balance;
-        item.currency = account.currency;
-        item.lastSynced = now;
-        changed = true;
-      } else {
-        item.lastSynced = now;
-      }
-    }
-
-    if (changed) markDirty();
-    renderAll();
-
-    if (!silent) showToast('余额已同步 ✓');
-  } catch (e) {
-    if (!silent) showToast(`同步失败：${e.message}`, 4000);
-    console.error(e);
-  }
+function setOfflineBanner(show) {
+  const el = document.getElementById('offline-banner');
+  if (el) el.classList.toggle('hidden', !show);
+  state.isOffline = show;
 }
 
 // ─── Snapshot Builder ─────────────────────────────────────────────────────────
@@ -670,12 +594,53 @@ async function loadData() {
     }
     state.isDirty = false;
 
+    // Save to local cache for offline use
+    saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
+    setOfflineBanner(false);
+
     setLoading(false);
     renderAll();
   } catch (err) {
-    setLoading(false);
-    showToast(`加载失败：${err.message}`, 4000);
     console.error(err);
+
+    // Try to fall back to local cache
+    const cache = loadLocalCache();
+    if (cache) {
+      state.currentItems = cache.items.map(i => ({ ...i }));
+      state.savedItems = cache.items.map(i => ({ ...i }));
+      state.snapshotIndex = cache.snapshotIndex || [];
+      state.isDirty = false;
+      setOfflineBanner(true);
+
+      // Still try to get fresh exchange rates (network may be partially available)
+      try {
+        const base = state.config?.baseCurrency || cache.baseCurrency || 'CNY';
+        state.exchangeRates = await fxApi.fetchRates(base);
+        const fxDateEl = document.getElementById('fx-rate-date');
+        if (fxDateEl) fxDateEl.textContent = `汇率日期：${state.exchangeRates.date}`;
+      } catch (_) { /* keep stale rates if also unavailable */ }
+
+      setLoading(false);
+      renderAll();
+      showToast('已离线，显示缓存数据', 4000);
+    } else {
+      setLoading(false);
+      showToast(`加载失败：${err.message}`, 4000);
+    }
+  }
+}
+
+async function refreshRates() {
+  if (!state.config) return;
+  try {
+    state.exchangeRates = await fxApi.fetchRates(state.config.baseCurrency);
+    const fxDateEl = document.getElementById('fx-rate-date');
+    if (fxDateEl) fxDateEl.textContent = `汇率日期：${state.exchangeRates.date}`;
+    renderTotalCard();
+    renderCategoryBreakdown();
+    showToast(`汇率已更新：${state.exchangeRates.date}`);
+  } catch (e) {
+    showToast('汇率更新失败', 3000);
   }
 }
 
@@ -743,6 +708,9 @@ async function saveSnapshot() {
     state.savedItems = state.currentItems.map(i => ({ ...i }));
     state.snapshotData = [snapshot];
     state.isDirty = false;
+
+    // Keep local cache in sync
+    saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
 
     showToast('快照已保存 ✓');
     renderAll();
@@ -895,8 +863,14 @@ function bindEvents() {
   // Header buttons
   document.getElementById('btn-settings').addEventListener('click', openSettings);
   document.getElementById('btn-refresh').addEventListener('click', async () => {
-    showToast('刷新中...');
-    await loadData();
+    if (state.isOffline) {
+      // Offline: only try to refresh FX rates
+      showToast('尝试更新汇率…');
+      await refreshRates();
+    } else {
+      showToast('刷新中...');
+      await loadData();
+    }
   });
 
   // Save snapshot
@@ -984,6 +958,12 @@ function bindEvents() {
     }
   });
 
+  // Offline banner: refresh rates button
+  document.getElementById('btn-refresh-rates').addEventListener('click', async () => {
+    showToast('更新汇率中…');
+    await refreshRates();
+  });
+
   // Setup autocomplete
   setupAutocomplete();
 }
@@ -1009,6 +989,16 @@ async function init() {
   }
   state.config = config;
   showDashboard();
+
+  // Pre-populate from cache so the UI isn't blank while GitHub loads
+  const cache = loadLocalCache();
+  if (cache) {
+    state.currentItems = cache.items.map(i => ({ ...i }));
+    state.savedItems = cache.items.map(i => ({ ...i }));
+    state.snapshotIndex = cache.snapshotIndex || [];
+    renderAll();
+  }
+
   await loadData();
 }
 

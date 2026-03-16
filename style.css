@@ -944,3 +944,36 @@ body {
     height: 220px;
   }
 }
+
+/* ─── Offline Banner ────────────────────────────────────────────────────────── */
+
+.offline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(255, 159, 10, 0.15);
+  border-bottom: 1px solid rgba(255, 159, 10, 0.3);
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--warning);
+}
+
+.offline-banner span {
+  flex: 1;
+}
+
+.offline-refresh-btn {
+  background: rgba(255, 159, 10, 0.2);
+  border: 1px solid rgba(255, 159, 10, 0.4);
+  color: var(--warning);
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.offline-refresh-btn:active {
+  opacity: 0.7;
+}
