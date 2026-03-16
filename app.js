@@ -43,6 +43,74 @@ const CATEGORY_ICONS = {
   '其他': '💼',
 };
 
+// Maps lowercase keyword → domain for Clearbit logo lookup.
+const INSTITUTION_DOMAINS = {
+  // US Brokerages
+  'robinhood':            'robinhood.com',
+  'interactive brokers':  'interactivebrokers.com',
+  'ibkr':                 'interactivebrokers.com',
+  'charles schwab':       'schwab.com',
+  'schwab':               'schwab.com',
+  'fidelity':             'fidelity.com',
+  'vanguard':             'vanguard.com',
+  'td ameritrade':        'tdameritrade.com',
+  'e*trade':              'etrade.com',
+  'etrade':               'etrade.com',
+  'webull':               'webull.com',
+  // US Banks
+  'jpmorgan':             'jpmorganchase.com',
+  'chase':                'chase.com',
+  'bank of america':      'bankofamerica.com',
+  'wells fargo':          'wellsfargo.com',
+  'citibank':             'citibank.com',
+  'citi':                 'citi.com',
+  'hsbc':                 'hsbc.com',
+  'dbs bank':             'dbs.com',
+  'standard chartered':   'sc.com',
+  'ubs':                  'ubs.com',
+  'credit suisse':        'credit-suisse.com',
+  // Chinese Banks
+  '招商银行':             'cmbchina.com',
+  '工商银行':             'icbc.com.cn',
+  '建设银行':             'ccb.com',
+  '农业银行':             'abchina.com',
+  '中国银行':             'boc.cn',
+  '交通银行':             'bankcomm.com',
+  '浦发银行':             'spdb.com.cn',
+  '中信银行':             'citicbank.com',
+  '光大银行':             'cebbank.com',
+  '民生银行':             'cmbc.com.cn',
+  '平安银行':             'bank.pingan.com',
+  '兴业银行':             'cib.com.cn',
+  '华夏银行':             'hxb.com.cn',
+  '广发银行':             'cgbchina.com.cn',
+  '北京银行':             'bankofbeijing.com.cn',
+  '上海银行':             'bosc.cn',
+  '宁波银行':             'nbcb.com.cn',
+  '邮储银行':             'psbc.com',
+  // Chinese Brokerages
+  '华泰证券':             'htsc.com.cn',
+  '国泰君安':             'gtja.com',
+  '中信证券':             'cs.ecitic.com',
+  '招商证券':             'csc108.com',
+  '广发证券':             'gf.com.cn',
+  '海通证券':             'htsec.com',
+  // Payment / Wealth
+  '支付宝':              'alipay.com',
+  '微信':                'weixin.qq.com',
+  '京东金融':            'jd.com',
+  '蚂蚁财富':            'antgroup.com',
+};
+
+function getInstitutionDomain(name) {
+  if (!name) return null;
+  const lower = name.toLowerCase();
+  for (const [key, domain] of Object.entries(INSTITUTION_DOMAINS)) {
+    if (lower.includes(key.toLowerCase())) return domain;
+  }
+  return null;
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 const state = {
@@ -260,6 +328,28 @@ const fxApi = {
   },
 };
 
+// ─── Local Cache ──────────────────────────────────────────────────────────────
+
+const CACHE_KEY = 'asset_tracker_cache';
+
+function saveLocalCache(items, snapshotIndex, baseCurrency) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      items,
+      snapshotIndex,
+      baseCurrency,
+      cachedAt: new Date().toISOString(),
+    }));
+  } catch (_) { /* storage full or unavailable — ignore */ }
+}
+
+function loadLocalCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
 // ─── Snapshot Builder ─────────────────────────────────────────────────────────
 
 function buildSnapshot(items, baseCurrency, exchangeRates) {
@@ -356,7 +446,11 @@ function renderAssetList() {
 
   listEl.innerHTML = currentItems.map(item => {
     const color = CATEGORY_COLORS[item.category] || CATEGORY_COLORS['其他'];
-    const icon = CATEGORY_ICONS[item.category] || '💼';
+    const fallback = CATEGORY_ICONS[item.category] || '💼';
+    const domain = getInstitutionDomain(item.assetName);
+    const iconHtml = domain
+      ? `<img class="asset-logo" src="https://logo.clearbit.com/${domain}" alt="" onerror="this.outerHTML='<span>${fallback}</span>'">`
+      : `<span>${fallback}</span>`;
     let valueInBase = item.amount;
     if (exchangeRates && item.currency !== base) {
       valueInBase = item.amount / (exchangeRates.rates[item.currency] || 1);
@@ -365,7 +459,7 @@ function renderAssetList() {
     return `
       <div class="asset-item" data-id="${item.assetId}">
         <div class="asset-icon" style="background:${color}22;">
-          <span>${icon}</span>
+          ${iconHtml}
         </div>
         <div class="asset-info">
           <div class="asset-name">${escHtml(item.assetName)}</div>
@@ -565,6 +659,9 @@ async function loadData() {
     }
     state.isDirty = false;
 
+    // Save to local cache for fast next load
+    saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
+
     setLoading(false);
     renderAll();
   } catch (err) {
@@ -638,6 +735,9 @@ async function saveSnapshot() {
     state.savedItems = state.currentItems.map(i => ({ ...i }));
     state.snapshotData = [snapshot];
     state.isDirty = false;
+
+    // Keep local cache in sync
+    saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
 
     showToast('快照已保存 ✓');
     renderAll();
@@ -904,6 +1004,16 @@ async function init() {
   }
   state.config = config;
   showDashboard();
+
+  // Pre-populate from cache so the UI isn't blank while GitHub loads
+  const cache = loadLocalCache();
+  if (cache) {
+    state.currentItems = cache.items.map(i => ({ ...i }));
+    state.savedItems = cache.items.map(i => ({ ...i }));
+    state.snapshotIndex = cache.snapshotIndex || [];
+    renderAll();
+  }
+
   await loadData();
 }
 
