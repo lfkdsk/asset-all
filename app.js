@@ -43,6 +43,82 @@ const CATEGORY_ICONS = {
   '其他': '💼',
 };
 
+// Maps lowercase keyword → emoji. Checked via substring match against asset name.
+const INSTITUTION_ICONS = {
+  // US Brokerages
+  'robinhood':            '🪶',
+  'interactive brokers':  '🖥️',
+  'ibkr':                 '🖥️',
+  'charles schwab':       '💼',
+  'schwab':               '💼',
+  'fidelity':             '🔷',
+  'vanguard':             '⛵',
+  'td ameritrade':        '📊',
+  'e*trade':              '💹',
+  'etrade':               '💹',
+  'webull':               '🐂',
+  // US Banks
+  'jpmorgan':             '🏛️',
+  'chase':                '🏛️',
+  'bank of america':      '🇺🇸',
+  'wells fargo':          '🐎',
+  'citibank':             '🌐',
+  'citi':                 '🌐',
+  'hsbc':                 '🔴',
+  'dbs':                  '🔴',
+  'standard chartered':   '🌍',
+  'ubs':                  '🔑',
+  // Chinese Banks
+  '招商银行':             '🚢',
+  '工商银行':             '🏦',
+  '建设银行':             '🏗️',
+  '农业银行':             '🌾',
+  '中国银行':             '🏦',
+  '交通银行':             '🚂',
+  '浦发银行':             '🌊',
+  '中信银行':             '🏦',
+  '光大银行':             '☀️',
+  '民生银行':             '👥',
+  '平安银行':             '🛡️',
+  '兴业银行':             '🌱',
+  '华夏银行':             '🌸',
+  '广发银行':             '🌏',
+  '北京银行':             '🏙️',
+  '上海银行':             '🏙️',
+  '宁波银行':             '⚓',
+  '邮储银行':             '📮',
+  // Chinese Brokerages
+  '华泰证券':             '📈',
+  '国泰君安':             '📊',
+  '中信证券':             '📈',
+  '招商证券':             '📊',
+  '广发证券':             '📊',
+  '海通证券':             '📈',
+  // Payment / Wealth
+  '支付宝':              '💳',
+  '微信':                '💬',
+  '余额宝':              '💰',
+  '理财通':              '💰',
+  '京东金融':            '🛒',
+  '蚂蚁财富':            '🐜',
+  // Retirement / Accounts
+  '401k':                '🏛️',
+  '401(k)':              '🏛️',
+  ' ira':                '🏛️',
+  'roth':                '🏛️',
+  'pension':             '🏖️',
+  'retirement':          '🏖️',
+};
+
+function getInstitutionIcon(name) {
+  if (!name) return null;
+  const lower = name.toLowerCase();
+  for (const [key, icon] of Object.entries(INSTITUTION_ICONS)) {
+    if (lower.includes(key.toLowerCase())) return icon;
+  }
+  return null;
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 const state = {
@@ -55,7 +131,6 @@ const state = {
   savedItems: [],         // items from the latest saved snapshot
   isDirty: false,
   trendChart: null,
-  isOffline: false,       // true when using localStorage cache instead of GitHub
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -283,12 +358,6 @@ function loadLocalCache() {
   } catch { return null; }
 }
 
-function setOfflineBanner(show) {
-  const el = document.getElementById('offline-banner');
-  if (el) el.classList.toggle('hidden', !show);
-  state.isOffline = show;
-}
-
 // ─── Snapshot Builder ─────────────────────────────────────────────────────────
 
 function buildSnapshot(items, baseCurrency, exchangeRates) {
@@ -385,7 +454,7 @@ function renderAssetList() {
 
   listEl.innerHTML = currentItems.map(item => {
     const color = CATEGORY_COLORS[item.category] || CATEGORY_COLORS['其他'];
-    const icon = CATEGORY_ICONS[item.category] || '💼';
+    const icon = getInstitutionIcon(item.assetName) || CATEGORY_ICONS[item.category] || '💼';
     let valueInBase = item.amount;
     if (exchangeRates && item.currency !== base) {
       valueInBase = item.amount / (exchangeRates.rates[item.currency] || 1);
@@ -594,53 +663,15 @@ async function loadData() {
     }
     state.isDirty = false;
 
-    // Save to local cache for offline use
+    // Save to local cache for fast next load
     saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
-    setOfflineBanner(false);
 
     setLoading(false);
     renderAll();
   } catch (err) {
+    setLoading(false);
+    showToast(`加载失败：${err.message}`, 4000);
     console.error(err);
-
-    // Try to fall back to local cache
-    const cache = loadLocalCache();
-    if (cache) {
-      state.currentItems = cache.items.map(i => ({ ...i }));
-      state.savedItems = cache.items.map(i => ({ ...i }));
-      state.snapshotIndex = cache.snapshotIndex || [];
-      state.isDirty = false;
-      setOfflineBanner(true);
-
-      // Still try to get fresh exchange rates (network may be partially available)
-      try {
-        const base = state.config?.baseCurrency || cache.baseCurrency || 'CNY';
-        state.exchangeRates = await fxApi.fetchRates(base);
-        const fxDateEl = document.getElementById('fx-rate-date');
-        if (fxDateEl) fxDateEl.textContent = `汇率日期：${state.exchangeRates.date}`;
-      } catch (_) { /* keep stale rates if also unavailable */ }
-
-      setLoading(false);
-      renderAll();
-      showToast('已离线，显示缓存数据', 4000);
-    } else {
-      setLoading(false);
-      showToast(`加载失败：${err.message}`, 4000);
-    }
-  }
-}
-
-async function refreshRates() {
-  if (!state.config) return;
-  try {
-    state.exchangeRates = await fxApi.fetchRates(state.config.baseCurrency);
-    const fxDateEl = document.getElementById('fx-rate-date');
-    if (fxDateEl) fxDateEl.textContent = `汇率日期：${state.exchangeRates.date}`;
-    renderTotalCard();
-    renderCategoryBreakdown();
-    showToast(`汇率已更新：${state.exchangeRates.date}`);
-  } catch (e) {
-    showToast('汇率更新失败', 3000);
   }
 }
 
@@ -863,14 +894,8 @@ function bindEvents() {
   // Header buttons
   document.getElementById('btn-settings').addEventListener('click', openSettings);
   document.getElementById('btn-refresh').addEventListener('click', async () => {
-    if (state.isOffline) {
-      // Offline: only try to refresh FX rates
-      showToast('尝试更新汇率…');
-      await refreshRates();
-    } else {
-      showToast('刷新中...');
-      await loadData();
-    }
+    showToast('刷新中...');
+    await loadData();
   });
 
   // Save snapshot
@@ -956,12 +981,6 @@ function bindEvents() {
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
     }
-  });
-
-  // Offline banner: refresh rates button
-  document.getElementById('btn-refresh-rates').addEventListener('click', async () => {
-    showToast('更新汇率中…');
-    await refreshRates();
   });
 
   // Setup autocomplete
