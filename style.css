@@ -468,6 +468,14 @@ body {
   font-size: 18px;
   margin-right: 14px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.asset-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: contain;
 }
 
 .asset-info {

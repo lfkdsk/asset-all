@@ -43,78 +43,70 @@ const CATEGORY_ICONS = {
   '其他': '💼',
 };
 
-// Maps lowercase keyword → emoji. Checked via substring match against asset name.
-const INSTITUTION_ICONS = {
+// Maps lowercase keyword → domain for Clearbit logo lookup.
+const INSTITUTION_DOMAINS = {
   // US Brokerages
-  'robinhood':            '🪶',
-  'interactive brokers':  '🖥️',
-  'ibkr':                 '🖥️',
-  'charles schwab':       '💼',
-  'schwab':               '💼',
-  'fidelity':             '🔷',
-  'vanguard':             '⛵',
-  'td ameritrade':        '📊',
-  'e*trade':              '💹',
-  'etrade':               '💹',
-  'webull':               '🐂',
+  'robinhood':            'robinhood.com',
+  'interactive brokers':  'interactivebrokers.com',
+  'ibkr':                 'interactivebrokers.com',
+  'charles schwab':       'schwab.com',
+  'schwab':               'schwab.com',
+  'fidelity':             'fidelity.com',
+  'vanguard':             'vanguard.com',
+  'td ameritrade':        'tdameritrade.com',
+  'e*trade':              'etrade.com',
+  'etrade':               'etrade.com',
+  'webull':               'webull.com',
   // US Banks
-  'jpmorgan':             '🏛️',
-  'chase':                '🏛️',
-  'bank of america':      '🇺🇸',
-  'wells fargo':          '🐎',
-  'citibank':             '🌐',
-  'citi':                 '🌐',
-  'hsbc':                 '🔴',
-  'dbs':                  '🔴',
-  'standard chartered':   '🌍',
-  'ubs':                  '🔑',
+  'jpmorgan':             'jpmorganchase.com',
+  'chase':                'chase.com',
+  'bank of america':      'bankofamerica.com',
+  'wells fargo':          'wellsfargo.com',
+  'citibank':             'citibank.com',
+  'citi':                 'citi.com',
+  'hsbc':                 'hsbc.com',
+  'dbs bank':             'dbs.com',
+  'standard chartered':   'sc.com',
+  'ubs':                  'ubs.com',
+  'credit suisse':        'credit-suisse.com',
   // Chinese Banks
-  '招商银行':             '🚢',
-  '工商银行':             '🏦',
-  '建设银行':             '🏗️',
-  '农业银行':             '🌾',
-  '中国银行':             '🏦',
-  '交通银行':             '🚂',
-  '浦发银行':             '🌊',
-  '中信银行':             '🏦',
-  '光大银行':             '☀️',
-  '民生银行':             '👥',
-  '平安银行':             '🛡️',
-  '兴业银行':             '🌱',
-  '华夏银行':             '🌸',
-  '广发银行':             '🌏',
-  '北京银行':             '🏙️',
-  '上海银行':             '🏙️',
-  '宁波银行':             '⚓',
-  '邮储银行':             '📮',
+  '招商银行':             'cmbchina.com',
+  '工商银行':             'icbc.com.cn',
+  '建设银行':             'ccb.com',
+  '农业银行':             'abchina.com',
+  '中国银行':             'boc.cn',
+  '交通银行':             'bankcomm.com',
+  '浦发银行':             'spdb.com.cn',
+  '中信银行':             'citicbank.com',
+  '光大银行':             'cebbank.com',
+  '民生银行':             'cmbc.com.cn',
+  '平安银行':             'bank.pingan.com',
+  '兴业银行':             'cib.com.cn',
+  '华夏银行':             'hxb.com.cn',
+  '广发银行':             'cgbchina.com.cn',
+  '北京银行':             'bankofbeijing.com.cn',
+  '上海银行':             'bosc.cn',
+  '宁波银行':             'nbcb.com.cn',
+  '邮储银行':             'psbc.com',
   // Chinese Brokerages
-  '华泰证券':             '📈',
-  '国泰君安':             '📊',
-  '中信证券':             '📈',
-  '招商证券':             '📊',
-  '广发证券':             '📊',
-  '海通证券':             '📈',
+  '华泰证券':             'htsc.com.cn',
+  '国泰君安':             'gtja.com',
+  '中信证券':             'cs.ecitic.com',
+  '招商证券':             'csc108.com',
+  '广发证券':             'gf.com.cn',
+  '海通证券':             'htsec.com',
   // Payment / Wealth
-  '支付宝':              '💳',
-  '微信':                '💬',
-  '余额宝':              '💰',
-  '理财通':              '💰',
-  '京东金融':            '🛒',
-  '蚂蚁财富':            '🐜',
-  // Retirement / Accounts
-  '401k':                '🏛️',
-  '401(k)':              '🏛️',
-  ' ira':                '🏛️',
-  'roth':                '🏛️',
-  'pension':             '🏖️',
-  'retirement':          '🏖️',
+  '支付宝':              'alipay.com',
+  '微信':                'weixin.qq.com',
+  '京东金融':            'jd.com',
+  '蚂蚁财富':            'antgroup.com',
 };
 
-function getInstitutionIcon(name) {
+function getInstitutionDomain(name) {
   if (!name) return null;
   const lower = name.toLowerCase();
-  for (const [key, icon] of Object.entries(INSTITUTION_ICONS)) {
-    if (lower.includes(key.toLowerCase())) return icon;
+  for (const [key, domain] of Object.entries(INSTITUTION_DOMAINS)) {
+    if (lower.includes(key.toLowerCase())) return domain;
   }
   return null;
 }
@@ -454,7 +446,11 @@ function renderAssetList() {
 
   listEl.innerHTML = currentItems.map(item => {
     const color = CATEGORY_COLORS[item.category] || CATEGORY_COLORS['其他'];
-    const icon = getInstitutionIcon(item.assetName) || CATEGORY_ICONS[item.category] || '💼';
+    const fallback = CATEGORY_ICONS[item.category] || '💼';
+    const domain = getInstitutionDomain(item.assetName);
+    const iconHtml = domain
+      ? `<img class="asset-logo" src="https://logo.clearbit.com/${domain}" alt="" onerror="this.outerHTML='<span>${fallback}</span>'">`
+      : `<span>${fallback}</span>`;
     let valueInBase = item.amount;
     if (exchangeRates && item.currency !== base) {
       valueInBase = item.amount / (exchangeRates.rates[item.currency] || 1);
@@ -463,7 +459,7 @@ function renderAssetList() {
     return `
       <div class="asset-item" data-id="${item.assetId}">
         <div class="asset-icon" style="background:${color}22;">
-          <span>${icon}</span>
+          ${iconHtml}
         </div>
         <div class="asset-info">
           <div class="asset-name">${escHtml(item.assetName)}</div>
