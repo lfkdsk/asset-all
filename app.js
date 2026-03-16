@@ -46,7 +46,7 @@ const CATEGORY_ICONS = {
 // ─── State ────────────────────────────────────────────────────────────────────
 
 const state = {
-  config: null,           // { token, owner, repo, branch, baseCurrency }
+  config: null,           // { token, owner, repo, branch, baseCurrency, workerUrl, workerApiKey }
   exchangeRates: null,    // { base, date, rates: {} }
   snapshotMeta: [],       // array of { name, sha, date, downloadUrl }
   snapshotIndex: [],      // lightweight manifest: [{date, totalInBase, baseCurrency, filename}]
@@ -55,6 +55,7 @@ const state = {
   savedItems: [],         // items from the latest saved snapshot
   isDirty: false,
   trendChart: null,
+  plaidAccounts: [],      // cached Plaid account list: [{account_id, item_id, institution_name, name, type, balance, currency}]
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -259,6 +260,110 @@ const fxApi = {
     return rates.rates[fromCurrency] ? (1 / rates.rates[fromCurrency]) : 1;
   },
 };
+
+// ─── Plaid API (via Cloudflare Worker proxy) ──────────────────────────────────
+
+const plaidApi = {
+  headers(cfg) {
+    return {
+      'Content-Type': 'application/json',
+      'X-Api-Key': cfg.workerApiKey || '',
+    };
+  },
+
+  async createLinkToken(cfg) {
+    const res = await fetch(`${cfg.workerUrl}/link-token`, {
+      method: 'POST',
+      headers: this.headers(cfg),
+    });
+    if (!res.ok) throw new Error(`Worker error: ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data.link_token;
+  },
+
+  async exchangeToken(cfg, publicToken, institution) {
+    const res = await fetch(`${cfg.workerUrl}/exchange`, {
+      method: 'POST',
+      headers: this.headers(cfg),
+      body: JSON.stringify({ public_token: publicToken, institution }),
+    });
+    if (!res.ok) throw new Error(`Worker error: ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+  },
+
+  async fetchAccounts(cfg) {
+    const res = await fetch(`${cfg.workerUrl}/accounts`, {
+      headers: this.headers(cfg),
+    });
+    if (!res.ok) throw new Error(`Worker error: ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+  },
+
+  async fetchItems(cfg) {
+    const res = await fetch(`${cfg.workerUrl}/items`, {
+      headers: this.headers(cfg),
+    });
+    if (!res.ok) throw new Error(`Worker error: ${res.status}`);
+    return res.json();
+  },
+
+  async removeItem(cfg, itemId) {
+    const res = await fetch(`${cfg.workerUrl}/item/${encodeURIComponent(itemId)}`, {
+      method: 'DELETE',
+      headers: this.headers(cfg),
+    });
+    if (!res.ok) throw new Error(`Worker error: ${res.status}`);
+    return res.json();
+  },
+};
+
+// ─── Plaid Sync ───────────────────────────────────────────────────────────────
+
+async function syncPlaidBalances(silent = false) {
+  const cfg = state.config;
+  if (!cfg?.workerUrl || !cfg?.workerApiKey) return;
+
+  if (!silent) showToast('正在同步账户余额…', 60000);
+
+  try {
+    const accounts = await plaidApi.fetchAccounts(cfg);
+    state.plaidAccounts = accounts.filter(a => !a.error);
+
+    // Render the accounts list in settings if panel is open
+    renderPlaidAccountsList();
+
+    // Update any asset items linked to Plaid accounts
+    const now = new Date().toISOString();
+    let changed = false;
+
+    for (const item of state.currentItems) {
+      if (!item.plaidAccountId) continue;
+      const account = state.plaidAccounts.find(a => a.account_id === item.plaidAccountId);
+      if (!account) continue;
+      if (account.balance !== item.amount || account.currency !== item.currency) {
+        item.amount = account.balance;
+        item.currency = account.currency;
+        item.lastSynced = now;
+        changed = true;
+      } else {
+        item.lastSynced = now;
+      }
+    }
+
+    if (changed) markDirty();
+    renderAll();
+
+    if (!silent) showToast('余额已同步 ✓');
+  } catch (e) {
+    if (!silent) showToast(`同步失败：${e.message}`, 4000);
+    console.error(e);
+  }
+}
 
 // ─── Snapshot Builder ─────────────────────────────────────────────────────────
 
