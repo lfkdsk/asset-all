@@ -508,8 +508,9 @@ body {
 }
 
 .asset-logo {
-  width: 42px;
-  height: 42px;
+  width: 28px;
+  height: 28px;
+  background-color: white;
   border-radius: 12px;
   object-fit: contain;
 }
