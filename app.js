@@ -123,7 +123,7 @@ const state = {
   savedItems: [],         // items from the latest saved snapshot
   isDirty: false,
   trendChart: null,
-  chartRange: 'ALL',
+  chartRange: '1M',
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
