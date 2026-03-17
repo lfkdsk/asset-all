@@ -115,8 +115,17 @@
         <span class="card-title">资产趋势</span>
         <span id="chart-no-data" class="no-data-hint hidden">暂无历史数据</span>
       </div>
+      <div id="chart-period-change" class="chart-period-change hidden"></div>
       <div class="chart-wrapper">
         <canvas id="trend-chart"></canvas>
+      </div>
+      <div class="chart-range-bar">
+        <button class="range-btn" data-range="1M">1M</button>
+        <button class="range-btn" data-range="3M">3M</button>
+        <button class="range-btn" data-range="6M">6M</button>
+        <button class="range-btn" data-range="1Y">1Y</button>
+        <button class="range-btn" data-range="3Y">3Y</button>
+        <button class="range-btn active" data-range="ALL">ALL</button>
       </div>
     </div>
 
