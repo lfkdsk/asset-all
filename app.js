@@ -123,6 +123,7 @@ const state = {
   savedItems: [],         // items from the latest saved snapshot
   isDirty: false,
   trendChart: null,
+  chartRange: 'ALL',
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -512,37 +513,82 @@ function renderCategoryBreakdown() {
   document.getElementById('category-card').classList.toggle('hidden', sorted.length === 0);
 }
 
+function getRangeCutoff(range) {
+  const now = new Date();
+  switch (range) {
+    case '1M': return new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()).toISOString().slice(0, 10);
+    case '3M': return new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()).toISOString().slice(0, 10);
+    case '6M': return new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()).toISOString().slice(0, 10);
+    case '1Y': return new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).toISOString().slice(0, 10);
+    case '3Y': return new Date(now.getFullYear() - 3, now.getMonth(), now.getDate()).toISOString().slice(0, 10);
+    default: return null;
+  }
+}
+
 function renderTrendChart() {
-  const { snapshotIndex, exchangeRates, config } = state;
+  const { snapshotIndex, exchangeRates, config, chartRange } = state;
   const base = config ? config.baseCurrency : 'CNY';
 
   const noDataEl = document.getElementById('chart-no-data');
+  const periodChangeEl = document.getElementById('chart-period-change');
 
   if (snapshotIndex.length < 1) {
     noDataEl.classList.remove('hidden');
+    periodChangeEl.classList.add('hidden');
     return;
   }
   noDataEl.classList.add('hidden');
 
-  const labels = [];
-  const values = [];
+  // Filter by range
+  const cutoff = getRangeCutoff(chartRange);
+  const filtered = cutoff
+    ? snapshotIndex.filter(e => e.date >= cutoff)
+    : snapshotIndex;
+  const data = filtered.length > 0 ? filtered : snapshotIndex;
 
-  for (const entry of snapshotIndex) {
-    labels.push(entry.date.slice(5)); // MM-DD
-    // Convert stored totalInBase to current base currency if different
+  // Convert totals to current base currency
+  function convertTotal(entry) {
     let total = entry.totalInBase;
     if (exchangeRates && entry.baseCurrency && entry.baseCurrency !== base) {
-      // entry.totalInBase is in entry.baseCurrency; convert to current base
       if (entry.baseCurrency === exchangeRates.base) {
         total = entry.totalInBase * (exchangeRates.rates[base] || 1);
       } else {
-        // Convert via intermediate: entry.baseCurrency → exchangeRates.base → current base
         const toExBase = entry.totalInBase / (exchangeRates.rates[entry.baseCurrency] || 1);
         total = toExBase * (exchangeRates.rates[base] || 1);
       }
     }
-    values.push(total);
+    return total;
   }
+
+  const labels = [];
+  const values = [];
+  const firstYear = data[0].date.slice(0, 4);
+  const multiYear = data.some(e => e.date.slice(0, 4) !== firstYear);
+
+  for (const entry of data) {
+    labels.push(multiYear ? entry.date.slice(2) : entry.date.slice(5));
+    values.push(convertTotal(entry));
+  }
+
+  // Period change display
+  if (data.length >= 2) {
+    const firstVal = values[0];
+    const lastVal = values[values.length - 1];
+    const diff = lastVal - firstVal;
+    const pct = firstVal > 0 ? ((diff / firstVal) * 100).toFixed(2) : 0;
+    const sign = diff >= 0 ? '+' : '';
+    const arrow = diff >= 0 ? '▲' : '▼';
+    periodChangeEl.textContent = `${arrow} ${sign}${formatAmountCompact(diff, base)} (${sign}${pct}%)`;
+    periodChangeEl.className = `chart-period-change ${diff >= 0 ? 'positive' : 'negative'}`;
+    periodChangeEl.classList.remove('hidden');
+  } else {
+    periodChangeEl.classList.add('hidden');
+  }
+
+  // Color based on trend
+  const isPositive = values.length < 2 || values[values.length - 1] >= values[0];
+  const lineColor = isPositive ? '#34C759' : '#FF453A';
+  const gradientTop = isPositive ? 'rgba(52,199,89,0.25)' : 'rgba(255,69,58,0.25)';
 
   const canvas = document.getElementById('trend-chart');
   const ctx = canvas.getContext('2d');
@@ -551,9 +597,9 @@ function renderTrendChart() {
     state.trendChart.destroy();
   }
 
-  const gradient = ctx.createLinearGradient(0, 0, 0, 160);
-  gradient.addColorStop(0, 'rgba(10,132,255,0.25)');
-  gradient.addColorStop(1, 'rgba(10,132,255,0)');
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.offsetHeight || 160);
+  gradient.addColorStop(0, gradientTop);
+  gradient.addColorStop(1, 'rgba(0,0,0,0)');
 
   state.trendChart = new Chart(ctx, {
     type: 'line',
@@ -561,16 +607,16 @@ function renderTrendChart() {
       labels,
       datasets: [{
         data: values,
-        borderColor: '#0A84FF',
-        borderWidth: 2.5,
+        borderColor: lineColor,
+        borderWidth: 2,
         backgroundColor: gradient,
         fill: true,
-        tension: 0.4,
-        pointRadius: values.length > 20 ? 0 : 4,
-        pointHoverRadius: 6,
-        pointBackgroundColor: '#0A84FF',
-        pointBorderColor: '#1C1C1E',
-        pointBorderWidth: 2,
+        tension: 0.3,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        pointHoverBackgroundColor: lineColor,
+        pointHoverBorderColor: '#1C1C1E',
+        pointHoverBorderWidth: 2,
       }],
     },
     options: {
@@ -587,7 +633,7 @@ function renderTrendChart() {
           bodyColor: '#FFFFFF',
           padding: 10,
           callbacks: {
-            label: ctx => formatAmount(ctx.raw, base),
+            label: c => formatAmount(c.raw, base),
           },
         },
       },
@@ -598,7 +644,8 @@ function renderTrendChart() {
           border: { display: false },
         },
         y: {
-          grid: { color: 'rgba(255,255,255,0.05)' },
+          position: 'right',
+          grid: { color: 'rgba(255,255,255,0.04)' },
           ticks: {
             color: 'rgba(235,235,245,0.4)',
             font: { size: 11 },
@@ -892,6 +939,16 @@ function bindEvents() {
   document.getElementById('btn-refresh').addEventListener('click', async () => {
     showToast('刷新中...');
     await loadData();
+  });
+
+  // Chart range buttons
+  document.querySelectorAll('.range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.chartRange = btn.dataset.range;
+      renderTrendChart();
+    });
   });
 
   // Save snapshot

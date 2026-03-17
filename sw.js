@@ -1,13 +1,6 @@
 /* Service Worker — Asset Tracker PWA */
 
-const CACHE = 'asset-tracker-v5';
-
-// CDN assets that rarely change — cache-first
-const STATIC_ASSETS = [
-  'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js',
-];
-
-// App shell files — pre-cached on install
+const CACHE = 'asset-tracker-v3';
 const APP_SHELL = [
   './',
   './index.html',
@@ -18,13 +11,12 @@ const APP_SHELL = [
   './icon-180.png',
   './icon-192.png',
   './icon-512.png',
+  'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js',
 ];
 
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE)
-      .then(c => c.addAll([...APP_SHELL, ...STATIC_ASSETS]))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE).then(c => c.addAll(APP_SHELL)).then(() => self.skipWaiting())
   );
 });
 
@@ -39,39 +31,20 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
-  // Network-first: GitHub API & exchange rate API (dynamic data)
+  // Always network-first for GitHub API and exchange rate API
   if (url.hostname === 'api.github.com' || url.hostname === 'api.frankfurter.dev') {
     e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
     return;
   }
 
-  // Cache-first: CDN static assets (Chart.js, icon.horse logos, etc.)
-  if (url.hostname.includes('jsdelivr.net') || url.hostname === 'icon.horse') {
-    e.respondWith(
-      caches.match(e.request).then(cached => cached || fetch(e.request).then(res => {
-        if (res.ok && e.request.method === 'GET') {
-          caches.open(CACHE).then(c => c.put(e.request, res.clone()));
-        }
-        return res;
-      }))
-    );
-    return;
-  }
-
-  // Stale-while-revalidate: app shell (index.html, app.js, style.css …)
-  // → Return cached version immediately, fetch update in background for next open
+  // Cache-first for app shell assets
   e.respondWith(
-    caches.open(CACHE).then(cache =>
-      cache.match(e.request).then(cached => {
-        const networkUpdate = fetch(e.request).then(res => {
-          if (res.ok && e.request.method === 'GET') {
-            cache.put(e.request, res.clone());
-          }
-          return res;
-        }).catch(() => cached);
-
-        return cached ?? networkUpdate;
-      })
-    )
+    caches.match(e.request).then(cached => cached || fetch(e.request).then(res => {
+      if (res.ok && e.request.method === 'GET') {
+        const clone = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+      }
+      return res;
+    }))
   );
 });
