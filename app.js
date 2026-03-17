@@ -527,8 +527,11 @@ function renderTrendChart() {
   const labels = [];
   const values = [];
 
+  const firstYear = snapshotIndex.length > 0 ? snapshotIndex[0].date.slice(0, 4) : null;
+  const multiYear = snapshotIndex.some(e => e.date.slice(0, 4) !== firstYear);
+
   for (const entry of snapshotIndex) {
-    labels.push(entry.date.slice(5)); // MM-DD
+    labels.push(multiYear ? entry.date.slice(2) : entry.date.slice(5)); // YY-MM-DD or MM-DD
     // Convert stored totalInBase to current base currency if different
     let total = entry.totalInBase;
     if (exchangeRates && entry.baseCurrency && entry.baseCurrency !== base) {
