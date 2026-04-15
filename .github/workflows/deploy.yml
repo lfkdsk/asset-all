@@ -1,0 +1,57 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with content hashes
+        run: |
+          mkdir dist
+
+          # Hash JS and CSS
+          JS_HASH=$(sha256sum app.js | cut -c1-8)
+          CSS_HASH=$(sha256sum style.css | cut -c1-8)
+
+          # Copy hashed assets
+          cp app.js  "dist/app.${JS_HASH}.js"
+          cp style.css "dist/style.${CSS_HASH}.css"
+
+          # Rewrite index.html references
+          sed -e "s|href=\"style.css\"|href=\"style.${CSS_HASH}.css\"|" \
+              -e "s|src=\"app.js\"|src=\"app.${JS_HASH}.js\"|" \
+              index.html > dist/index.html
+
+          # Rewrite sw.js APP_SHELL entries
+          sed -e "s|'./style.css'|'./style.${CSS_HASH}.css'|" \
+              -e "s|'./app.js'|'./app.${JS_HASH}.js'|" \
+              sw.js > dist/sw.js
+
+          # Copy static assets as-is
+          cp manifest.json CNAME icon.svg icon-180.png icon-192.png icon-512.png dist/
+
+          echo "Built: app.${JS_HASH}.js, style.${CSS_HASH}.css"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - uses: actions/deploy-pages@v4
+        id: deployment
