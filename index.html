@@ -107,7 +107,10 @@
         <span id="total-currency-badge" class="currency-badge"></span>
         <span id="total-change" class="total-change"></span>
       </div>
-      <div class="total-date" id="total-date"></div>
+      <div class="total-date-wrapper">
+        <div class="total-date" id="total-date"></div>
+        <div id="fx-tooltip" class="fx-tooltip hidden"></div>
+      </div>
     </div>
 
     <!-- Trend Chart -->
@@ -140,6 +143,10 @@
           </svg>
           添加
         </button>
+      </div>
+      <div id="snapshot-view-banner" class="snapshot-view-banner hidden">
+        <span id="snapshot-view-date"></span>
+        <button class="btn-small btn-accent" id="btn-snapshot-back">返回当前</button>
       </div>
       <div id="asset-list" class="asset-list"></div>
       <div id="asset-list-empty" class="empty-state hidden">
@@ -230,6 +237,22 @@
         </div>
         <button class="btn-primary btn-full" id="btn-settings-save">保存配置</button>
         <p id="settings-error" class="error-text hidden"></p>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">历史数据</div>
+        <p class="settings-hint">补录指定日期的完整资产快照</p>
+        <button class="btn-primary btn-full" id="btn-open-history">添加历史快照</button>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">管理快照</div>
+        <p class="settings-hint">删除的快照会移至 trash 文件夹</p>
+        <div id="snapshot-manage-list" class="snapshot-manage-list">
+          <p class="settings-hint">加载中...</p>
+        </div>
+        <button class="btn-secondary btn-full" id="btn-fix-fx" style="margin-top:12px">
+          <span id="btn-fix-fx-text">矫正历史汇率</span>
+        </button>
+        <p id="fix-fx-progress" class="settings-hint hidden"></p>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">关于</div>
@@ -325,9 +348,67 @@
   </div>
 </div>
 
+<!-- History Snapshot Panel -->
+<div id="panel-history" class="panel hidden">
+  <div class="panel-overlay" id="history-overlay"></div>
+  <div class="panel-sheet panel-sheet-wide">
+    <div class="panel-header">
+      <h2>添加历史快照</h2>
+      <button class="icon-btn" id="btn-close-history">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="panel-body">
+      <div class="form-group">
+        <label>快照日期</label>
+        <input type="date" id="history-date">
+      </div>
+      <div class="history-items-header">
+        <span class="settings-section-title">资产列表</span>
+        <button type="button" class="btn-small btn-accent" id="btn-history-add-item">+ 添加</button>
+      </div>
+      <div id="history-items-list" class="history-items-list"></div>
+      <div class="history-total" id="history-total"></div>
+      <button class="btn-primary btn-full" id="btn-save-history">
+        <span id="btn-history-text">保存快照</span>
+      </button>
+      <p id="history-error" class="error-text hidden"></p>
+    </div>
+  </div>
+</div>
+
 <!-- Toast Notification -->
 <div id="toast" class="toast hidden"></div>
 
+<script>
+(async function versionCheck() {
+  const LOCAL_VER_KEY = 'asset_tracker_version';
+  try {
+    const res = await fetch('./version.json?' + Date.now());
+    if (!res.ok) return;
+    const { version } = await res.json();
+    const local = localStorage.getItem(LOCAL_VER_KEY);
+    if (local && local !== version) {
+      // Nuke caches
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+      // Unregister service workers
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+      localStorage.setItem(LOCAL_VER_KEY, version);
+      window.location.replace('./?v=' + Date.now());
+      return;
+    }
+    localStorage.setItem(LOCAL_VER_KEY, version);
+  } catch (_) { /* offline or fetch failed, skip */ }
+})();
+</script>
 <script src="app.js"></script>
 </body>
 </html>

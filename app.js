@@ -124,6 +124,7 @@ const state = {
   isDirty: false,
   trendChart: null,
   chartRange: '1M',
+  viewingSnapshot: null, // { date, items } when viewing a historical snapshot
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -291,6 +292,67 @@ const githubApi = {
     return data.sha || null;
   },
 
+  async getFileMeta(cfg, path) {
+    const url = `${this.baseUrl(cfg)}/contents/${path}`;
+    const res = await fetch(url, { headers: this.headers(cfg.token) });
+    if (!res.ok) return null;
+    return res.json();
+  },
+
+  async deleteFile(cfg, path, sha, message) {
+    const url = `${this.baseUrl(cfg)}/contents/${path}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { ...this.headers(cfg.token), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, sha, branch: cfg.branch || 'main' }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Delete failed: ${res.status}`);
+    }
+  },
+
+  async moveToTrash(cfg, filename, content, sha) {
+    // 1. Create file in trash/ folder
+    const trashPath = `snapshots/trash/${filename}`;
+    const trashUrl = `${this.baseUrl(cfg)}/contents/${trashPath}`;
+    const putRes = await fetch(trashUrl, {
+      method: 'PUT',
+      headers: { ...this.headers(cfg.token), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: `trash: ${filename}`,
+        content,
+        branch: cfg.branch || 'main',
+      }),
+    });
+    if (!putRes.ok) {
+      const err = await putRes.json().catch(() => ({}));
+      throw new Error(err.message || `Move to trash failed: ${putRes.status}`);
+    }
+    // 2. Delete original
+    await this.deleteFile(cfg, `snapshots/${filename}`, sha, `remove: ${filename}`);
+  },
+
+  async updateFile(cfg, path, content, sha, message) {
+    const url = `${this.baseUrl(cfg)}/contents/${path}`;
+    const body = {
+      message,
+      content: btoa(unescape(encodeURIComponent(content))),
+      sha,
+      branch: cfg.branch || 'main',
+    };
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { ...this.headers(cfg.token), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Update failed: ${res.status}`);
+    }
+    return res.json();
+  },
+
   async testConnection(cfg) {
     const url = `${this.baseUrl(cfg)}`;
     const res = await fetch(url, { headers: this.headers(cfg.token) });
@@ -302,8 +364,9 @@ const githubApi = {
 // ─── Exchange Rate API ────────────────────────────────────────────────────────
 
 const fxApi = {
-  async fetchRates(baseCurrency) {
-    const url = `https://api.frankfurter.dev/v1/latest?base=${baseCurrency}`;
+  async fetchRates(baseCurrency, date) {
+    const endpoint = date ? date : 'latest';
+    const url = `https://api.frankfurter.dev/v1/${endpoint}?base=${baseCurrency}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to fetch exchange rates');
     const data = await res.json();
@@ -387,13 +450,24 @@ function buildSnapshot(items, baseCurrency, exchangeRates) {
 // ─── Rendering ────────────────────────────────────────────────────────────────
 
 function renderTotalCard() {
-  const { currentItems, exchangeRates, config, snapshotData } = state;
+  const { currentItems, exchangeRates, config, viewingSnapshot } = state;
   if (!config) return;
 
   const base = config.baseCurrency;
+  const isHistorical = !!viewingSnapshot;
   let total = 0;
 
-  if (exchangeRates) {
+  if (isHistorical) {
+    // Sum from snapshot items' valueInBase, convert if baseCurrency differs
+    const snapBase = viewingSnapshot.baseCurrency;
+    const rawTotal = viewingSnapshot.items.reduce((sum, i) => sum + (i.valueInBase ?? i.amount), 0);
+    if (snapBase !== base && exchangeRates) {
+      const toExBase = rawTotal / (exchangeRates.rates[snapBase] || 1);
+      total = toExBase * (exchangeRates.rates[base] || 1);
+    } else {
+      total = rawTotal;
+    }
+  } else if (exchangeRates) {
     total = currentItems.reduce((sum, item) => {
       const val = item.currency === base
         ? item.amount
@@ -425,7 +499,11 @@ function renderTotalCard() {
 
   // Change vs previous snapshot
   const changeEl = document.getElementById('total-change');
-  if (state.snapshotIndex.length >= 2) {
+  if (isHistorical) {
+    // Show snapshot date instead of diff
+    changeEl.textContent = `快照：${viewingSnapshot.date}`;
+    changeEl.className = 'total-change';
+  } else if (state.snapshotIndex.length >= 2) {
     const prev = state.snapshotIndex[state.snapshotIndex.length - 2];
     let prevTotal = prev.totalInBase || 0;
     if (exchangeRates && prev.baseCurrency && prev.baseCurrency !== base) {
@@ -446,43 +524,75 @@ function renderTotalCard() {
   }
 
   const dateEl = document.getElementById('total-date');
-  dateEl.textContent = exchangeRates ? `汇率更新：${exchangeRates.date}` : '';
+  const fxTooltip = document.getElementById('fx-tooltip');
+  if (isHistorical) {
+    dateEl.textContent = `快照日期：${viewingSnapshot.date}`;
+    fxTooltip.classList.add('hidden');
+    fxTooltip.innerHTML = '';
+  } else {
+    dateEl.textContent = exchangeRates ? `汇率更新：${exchangeRates.date}` : '';
+    // Build FX tooltip content: show rates for currencies held by user
+    if (exchangeRates) {
+      const heldCurrencies = [...new Set(currentItems.map(i => i.currency))].filter(c => c !== base).sort();
+      if (heldCurrencies.length > 0) {
+        fxTooltip.innerHTML = heldCurrencies.map(c => {
+          const rate = 1 / (exchangeRates.rates[c] || 1);
+          return `<div>1 ${c} = ${rate.toFixed(4)} ${base}</div>`;
+        }).join('');
+      } else {
+        fxTooltip.innerHTML = '';
+        fxTooltip.classList.add('hidden');
+      }
+    }
+  }
 }
 
 function renderAssetList() {
-  const { currentItems, exchangeRates, config } = state;
+  const { currentItems, exchangeRates, config, viewingSnapshot } = state;
   const listEl = document.getElementById('asset-list');
   const emptyEl = document.getElementById('asset-list-empty');
 
-  if (currentItems.length === 0) {
+  // Determine which items to show
+  const isHistorical = !!viewingSnapshot;
+  const items = isHistorical ? viewingSnapshot.items : currentItems;
+  const base = isHistorical
+    ? (config ? config.baseCurrency : viewingSnapshot.baseCurrency)
+    : (config ? config.baseCurrency : 'CNY');
+
+  if (items.length === 0) {
     listEl.innerHTML = '';
     emptyEl.classList.remove('hidden');
     return;
   }
   emptyEl.classList.add('hidden');
 
-  const base = config ? config.baseCurrency : 'CNY';
-
-  listEl.innerHTML = currentItems.map(item => {
-    const color = CATEGORY_COLORS[item.category] || CATEGORY_COLORS['其他'];
-    const fallback = CATEGORY_ICONS[item.category] || '💼';
+  listEl.innerHTML = items.map(item => {
+    const category = item.category || '其他';
+    const color = CATEGORY_COLORS[category] || CATEGORY_COLORS['其他'];
+    const fallback = CATEGORY_ICONS[category] || '💼';
     const domain = getInstitutionDomain(item.assetName);
     const iconHtml = domain
       ? `<img class="asset-logo" src="https://icon.horse/icon/${domain}" alt="" onerror="this.outerHTML='<span>${fallback}</span>'">`
       : `<span>${fallback}</span>`;
-    let valueInBase = item.amount;
-    if (exchangeRates && item.currency !== base) {
-      valueInBase = item.amount / (exchangeRates.rates[item.currency] || 1);
+
+    let valueInBase;
+    if (isHistorical) {
+      valueInBase = item.valueInBase ?? item.amount;
+    } else {
+      valueInBase = item.amount;
+      if (exchangeRates && item.currency !== base) {
+        valueInBase = item.amount / (exchangeRates.rates[item.currency] || 1);
+      }
     }
     const showOrig = item.currency !== base;
     return `
-      <div class="asset-item" data-id="${item.assetId}">
+      <div class="asset-item ${isHistorical ? 'asset-item-readonly' : ''}" data-id="${item.assetId}">
         <div class="asset-icon" style="background:${color}22;">
           ${iconHtml}
         </div>
         <div class="asset-info">
           <div class="asset-name">${escHtml(item.assetName)}</div>
-          <div class="asset-meta">${escHtml(item.category)}${item.notes ? ' · ' + escHtml(item.notes) : ''}</div>
+          <div class="asset-meta">${escHtml(category)}${item.notes ? ' · ' + escHtml(item.notes) : ''}</div>
         </div>
         <div class="asset-amounts">
           <div class="asset-value-base">${formatAmount(valueInBase, base)}</div>
@@ -491,9 +601,39 @@ function renderAssetList() {
       </div>`;
   }).join('');
 
-  listEl.querySelectorAll('.asset-item').forEach(el => {
-    el.addEventListener('click', () => openEditModal(el.dataset.id));
-  });
+  // Only bind click-to-edit for current items, not historical view
+  if (!isHistorical) {
+    listEl.querySelectorAll('.asset-item').forEach(el => {
+      el.addEventListener('click', () => openEditModal(el.dataset.id));
+    });
+  }
+}
+
+async function loadSnapshotView(entry) {
+  if (!state.config) return;
+  const banner = document.getElementById('snapshot-view-banner');
+  const dateEl = document.getElementById('snapshot-view-date');
+
+  dateEl.textContent = `加载 ${entry.date}...`;
+  banner.classList.remove('hidden');
+
+  try {
+    const snapshot = await githubApi.fetchSnapshot(state.config, entry.filename);
+    state.viewingSnapshot = { date: entry.date, items: snapshot.items, baseCurrency: snapshot.baseCurrency };
+    dateEl.textContent = `查看快照：${entry.date}`;
+    renderTotalCard();
+    renderAssetList();
+  } catch (err) {
+    showToast(`加载失败：${err.message}`, 3000);
+    banner.classList.add('hidden');
+  }
+}
+
+function exitSnapshotView() {
+  state.viewingSnapshot = null;
+  document.getElementById('snapshot-view-banner').classList.add('hidden');
+  renderTotalCard();
+  renderAssetList();
 }
 
 function getRangeCutoff(range) {
@@ -592,6 +732,9 @@ function renderTrendChart() {
   gradient.addColorStop(0, gradientTop);
   gradient.addColorStop(1, 'rgba(0,0,0,0)');
 
+  // Store filtered data for click handler
+  state._chartData = data;
+
   state.trendChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -603,8 +746,10 @@ function renderTrendChart() {
         backgroundColor: gradient,
         fill: true,
         tension: 0.3,
-        pointRadius: 0,
-        pointHoverRadius: 5,
+        pointRadius: 3,
+        pointBackgroundColor: lineColor,
+        pointBorderColor: 'transparent',
+        pointHoverRadius: 6,
         pointHoverBackgroundColor: lineColor,
         pointHoverBorderColor: '#1C1C1E',
         pointHoverBorderWidth: 2,
@@ -614,6 +759,16 @@ function renderTrendChart() {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
+      onClick(evt, elements) {
+        if (elements.length > 0) {
+          const idx = elements[0].index;
+          const entry = state._chartData[idx];
+          if (entry) loadSnapshotView(entry);
+        }
+      },
+      onHover(evt, elements) {
+        evt.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -838,6 +993,9 @@ function openSettings() {
   if (fxDateEl && state.exchangeRates) {
     fxDateEl.textContent = `汇率日期：${state.exchangeRates.date}`;
   }
+
+  // Render snapshot management list
+  renderSnapshotManageList();
 }
 
 function closeSettings() {
@@ -1027,8 +1185,350 @@ function bindEvents() {
     }
   });
 
+  // FX tooltip toggle
+  document.getElementById('total-date').addEventListener('click', () => {
+    const tip = document.getElementById('fx-tooltip');
+    if (tip.innerHTML) tip.classList.toggle('hidden');
+  });
+
+  // Snapshot view back button
+  document.getElementById('btn-snapshot-back').addEventListener('click', exitSnapshotView);
+
+  // Historical snapshot panel & FX fix
+  document.getElementById('btn-open-history').addEventListener('click', openHistoryPanel);
+  document.getElementById('btn-fix-fx').addEventListener('click', fixHistoricalFx);
+  document.getElementById('btn-close-history').addEventListener('click', closeHistoryPanel);
+  document.getElementById('history-overlay').addEventListener('click', closeHistoryPanel);
+  document.getElementById('btn-history-add-item').addEventListener('click', addHistoryRow);
+  document.getElementById('btn-save-history').addEventListener('click', saveHistoricalSnapshot);
+
   // Setup autocomplete
   setupAutocomplete();
+}
+
+// ─── Historical Snapshot ─────────────────────────────────────────────────────
+
+let historyItems = []; // temp items for the history panel
+
+function openHistoryPanel() {
+  const panel = document.getElementById('panel-history');
+  panel.classList.remove('hidden');
+  document.getElementById('history-date').value = '';
+  document.getElementById('history-error').classList.add('hidden');
+  // Pre-populate with current asset list as a starting point
+  historyItems = state.currentItems.map(item => ({
+    assetName: item.assetName,
+    currency: item.currency,
+    amount: 0,
+  }));
+  if (historyItems.length === 0) addHistoryRow();
+  renderHistoryItems();
+}
+
+function closeHistoryPanel() {
+  document.getElementById('panel-history').classList.add('hidden');
+}
+
+function addHistoryRow() {
+  historyItems.push({ assetName: '', currency: state.config?.baseCurrency || 'CNY', amount: 0 });
+  renderHistoryItems();
+}
+
+function removeHistoryRow(idx) {
+  historyItems.splice(idx, 1);
+  renderHistoryItems();
+}
+
+function renderHistoryItems() {
+  const list = document.getElementById('history-items-list');
+  const baseCurrency = state.config?.baseCurrency || 'CNY';
+  const currencies = ['CNY','USD','EUR','HKD','JPY','GBP','SGD','AUD','CAD','CHF'];
+
+  list.innerHTML = historyItems.map((item, i) => `
+    <div class="history-item-row">
+      <input type="text" placeholder="资产名称" value="${escHtml(item.assetName)}" data-idx="${i}" data-field="assetName">
+      <select data-idx="${i}" data-field="currency">
+        ${currencies.map(c => `<option value="${c}" ${c === item.currency ? 'selected' : ''}>${c}</option>`).join('')}
+      </select>
+      <input type="number" placeholder="金额" step="0.01" min="0" value="${item.amount || ''}" data-idx="${i}" data-field="amount">
+      <button type="button" class="btn-remove-row" data-idx="${i}">&times;</button>
+    </div>
+  `).join('');
+
+  // Bind input changes
+  list.querySelectorAll('input, select').forEach(el => {
+    el.addEventListener('change', () => {
+      const idx = parseInt(el.dataset.idx);
+      const field = el.dataset.field;
+      historyItems[idx][field] = field === 'amount' ? (parseFloat(el.value) || 0) : el.value;
+      updateHistoryTotal();
+    });
+  });
+
+  // Bind remove buttons
+  list.querySelectorAll('.btn-remove-row').forEach(btn => {
+    btn.addEventListener('click', () => removeHistoryRow(parseInt(btn.dataset.idx)));
+  });
+
+  updateHistoryTotal();
+}
+
+function updateHistoryTotal() {
+  const base = state.config?.baseCurrency || 'CNY';
+  let total = 0;
+  for (const item of historyItems) {
+    if (item.currency === base) {
+      total += item.amount;
+    } else if (state.exchangeRates) {
+      total += item.amount / (state.exchangeRates.rates[item.currency] || 1);
+    }
+  }
+  const el = document.getElementById('history-total');
+  const count = historyItems.filter(i => i.assetName && i.amount > 0).length;
+  const hasMultiCurrency = new Set(historyItems.map(i => i.currency)).size > 1;
+  el.textContent = `共 ${count} 项 · 合计 ${formatAmountCompact(total, base)}` +
+    (hasMultiCurrency ? '（保存时将使用历史汇率）' : '');
+}
+
+async function saveHistoricalSnapshot() {
+  const dateInput = document.getElementById('history-date');
+  const btn = document.getElementById('btn-save-history');
+  const textEl = document.getElementById('btn-history-text');
+  const errEl = document.getElementById('history-error');
+  errEl.classList.add('hidden');
+
+  const dateStr = dateInput.value;
+  if (!dateStr) { errEl.textContent = '请选择日期'; errEl.classList.remove('hidden'); return; }
+  if (dateStr > today()) { errEl.textContent = '不能选择未来日期'; errEl.classList.remove('hidden'); return; }
+  if (!state.config) { errEl.textContent = '请先配置 GitHub'; errEl.classList.remove('hidden'); return; }
+
+  // Filter valid items
+  const validItems = historyItems.filter(i => i.assetName.trim() && i.amount > 0);
+  if (validItems.length === 0) { errEl.textContent = '请至少添加一条资产'; errEl.classList.remove('hidden'); return; }
+
+  if (state.snapshotIndex.some(e => e.date === dateStr)) {
+    errEl.textContent = `${dateStr} 已存在快照`;
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  btn.disabled = true;
+  textEl.textContent = '拉取历史汇率...';
+
+  try {
+    const base = state.config.baseCurrency;
+
+    // Fetch historical exchange rates for the specified date
+    const historicalRates = await fxApi.fetchRates(base, dateStr);
+
+    textEl.textContent = '保存中...';
+
+    const processedItems = validItems.map(item => {
+      const fxRate = item.currency === base
+        ? 1
+        : (1 / (historicalRates.rates[item.currency] || 1));
+      return {
+        assetId: uuid(),
+        assetName: item.assetName.trim(),
+        category: '其他',
+        currency: item.currency,
+        amount: item.amount,
+        notes: '',
+        fxRateToBase: fxRate,
+        valueInBase: item.amount * fxRate,
+      };
+    });
+
+    const totalInBase = processedItems.reduce((sum, i) => sum + i.valueInBase, 0);
+    const snapshot = {
+      version: 1,
+      id: uuid(),
+      snapshotDate: dateStr,
+      createdAt: new Date().toISOString(),
+      baseCurrency: base,
+      fxDate: historicalRates.date,
+      items: processedItems,
+      totalInBase,
+    };
+    const filename = `${dateStr}_${snapshot.id}.json`;
+
+    const [, indexSha] = await Promise.all([
+      githubApi.saveSnapshot(state.config, snapshot),
+      githubApi.getIndexSha(state.config),
+    ]);
+
+    const newEntry = { date: dateStr, totalInBase, baseCurrency: base, filename };
+    const updatedIndex = [...state.snapshotIndex, newEntry]
+      .sort((a, b) => a.date.localeCompare(b.date));
+    await githubApi.saveIndex(state.config, updatedIndex, indexSha);
+
+    state.snapshotIndex = updatedIndex;
+    saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
+
+    closeHistoryPanel();
+    showToast(`历史快照 ${dateStr} 已保存 ✓`);
+    renderAll();
+  } catch (err) {
+    errEl.textContent = `保存失败：${err.message}`;
+    errEl.classList.remove('hidden');
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    textEl.textContent = '保存快照';
+  }
+}
+
+// ─── Snapshot Management ─────────────────────────────────────────────────────
+
+function renderSnapshotManageList() {
+  const container = document.getElementById('snapshot-manage-list');
+  const index = state.snapshotIndex;
+  const base = state.config?.baseCurrency || 'CNY';
+
+  if (!index || index.length === 0) {
+    container.innerHTML = '<p class="snapshot-manage-empty">暂无快照</p>';
+    return;
+  }
+
+  container.innerHTML = index.map((entry, i) => `
+    <div class="snapshot-manage-row">
+      <div class="snapshot-manage-info">
+        <span class="snapshot-manage-date">${escHtml(entry.date)}</span>
+        <span class="snapshot-manage-total">${formatAmountCompact(entry.totalInBase, entry.baseCurrency || base)}</span>
+      </div>
+      <button class="btn-trash" data-idx="${i}" data-filename="${escHtml(entry.filename)}" data-date="${escHtml(entry.date)}">删除</button>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('.btn-trash').forEach(btn => {
+    btn.addEventListener('click', () => handleDeleteSnapshot(btn));
+  });
+}
+
+async function handleDeleteSnapshot(btn) {
+  const filename = btn.dataset.filename;
+  const date = btn.dataset.date;
+  if (!confirm(`确定删除 ${date} 的快照？\n文件会移至 trash 文件夹`)) return;
+
+  btn.disabled = true;
+  btn.textContent = '删除中...';
+
+  try {
+    // Get file metadata (need sha and content)
+    const meta = await githubApi.getFileMeta(state.config, `snapshots/${filename}`);
+    if (!meta) throw new Error('快照文件不存在');
+
+    // Move to trash (copy content, then delete original)
+    await githubApi.moveToTrash(state.config, filename, meta.content.replace(/\s/g, ''), meta.sha);
+
+    // Update index
+    const updatedIndex = state.snapshotIndex.filter(e => e.filename !== filename);
+    const indexSha = await githubApi.getIndexSha(state.config);
+    await githubApi.saveIndex(state.config, updatedIndex, indexSha);
+
+    state.snapshotIndex = updatedIndex;
+    saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
+
+    showToast(`快照 ${date} 已移至回收站 ✓`);
+    renderSnapshotManageList();
+    renderAll();
+  } catch (err) {
+    showToast(`删除失败：${err.message}`, 4000);
+    btn.disabled = false;
+    btn.textContent = '删除';
+    console.error(err);
+  }
+}
+
+async function fixHistoricalFx() {
+  const btn = document.getElementById('btn-fix-fx');
+  const textEl = document.getElementById('btn-fix-fx-text');
+  const progressEl = document.getElementById('fix-fx-progress');
+
+  if (!state.config) { showToast('请先配置 GitHub'); return; }
+  const index = state.snapshotIndex;
+  if (!index || index.length === 0) { showToast('没有快照需要矫正'); return; }
+  if (!confirm(`将对 ${index.length} 个快照重新拉取历史汇率并更新，确定继续？`)) return;
+
+  btn.disabled = true;
+  progressEl.classList.remove('hidden');
+  const updatedIndex = [];
+
+  try {
+    for (let i = 0; i < index.length; i++) {
+      const entry = index[i];
+      progressEl.textContent = `(${i + 1}/${index.length}) 处理 ${entry.date}...`;
+      textEl.textContent = `矫正中 ${i + 1}/${index.length}`;
+
+      // 1. Fetch the snapshot file
+      const meta = await githubApi.getFileMeta(state.config, `snapshots/${entry.filename}`);
+      if (!meta) {
+        updatedIndex.push(entry);
+        continue;
+      }
+      const snapshot = JSON.parse(decodeURIComponent(escape(atob(meta.content.replace(/\s/g, '')))));
+
+      // 2. Fetch historical rates for that date
+      const base = snapshot.baseCurrency;
+      const historicalRates = await fxApi.fetchRates(base, entry.date);
+
+      // 3. Recalculate each item
+      let changed = false;
+      for (const item of snapshot.items) {
+        const newRate = item.currency === base
+          ? 1
+          : (1 / (historicalRates.rates[item.currency] || 1));
+        const newValue = item.amount * newRate;
+        if (Math.abs(newRate - (item.fxRateToBase || 1)) > 1e-8) {
+          changed = true;
+        }
+        item.fxRateToBase = newRate;
+        item.valueInBase = newValue;
+      }
+
+      if (changed) {
+        snapshot.totalInBase = snapshot.items.reduce((sum, it) => sum + it.valueInBase, 0);
+        snapshot.fxDate = historicalRates.date;
+
+        // 4. Update the file on GitHub
+        const content = JSON.stringify(snapshot, null, 2);
+        await githubApi.updateFile(
+          state.config,
+          `snapshots/${entry.filename}`,
+          content,
+          meta.sha,
+          `fix-fx: ${entry.date}`
+        );
+
+        updatedIndex.push({
+          ...entry,
+          totalInBase: snapshot.totalInBase,
+        });
+      } else {
+        updatedIndex.push(entry);
+      }
+    }
+
+    // 5. Update index.json
+    progressEl.textContent = '更新 index.json...';
+    const indexSha = await githubApi.getIndexSha(state.config);
+    await githubApi.saveIndex(state.config, updatedIndex, indexSha);
+
+    state.snapshotIndex = updatedIndex;
+    saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
+
+    progressEl.textContent = '全部完成 ✓';
+    showToast('历史汇率矫正完成 ✓');
+    renderSnapshotManageList();
+    renderAll();
+  } catch (err) {
+    showToast(`矫正失败：${err.message}`, 4000);
+    progressEl.textContent = `出错：${err.message}`;
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    textEl.textContent = '矫正历史汇率';
+  }
 }
 
 // ─── HTML escaping ────────────────────────────────────────────────────────────
