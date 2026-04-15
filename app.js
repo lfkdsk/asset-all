@@ -405,6 +405,24 @@ function renderTotalCard() {
   document.getElementById('total-amount').textContent = formatAmountCompact(total, base);
   document.getElementById('total-currency-badge').textContent = base;
 
+  // USD auxiliary display (when base ≠ USD)
+  const usdEl = document.getElementById('total-usd');
+  if (usdEl) {
+    if (exchangeRates && base !== 'USD' && total > 0) {
+      const usdRate = exchangeRates.rates['USD'];
+      if (usdRate) {
+        const totalUsd = base === exchangeRates.base
+          ? total * usdRate
+          : total / (exchangeRates.rates[base] || 1) * usdRate;
+        usdEl.textContent = `≈ ${formatAmount(totalUsd, 'USD')}`;
+      } else {
+        usdEl.textContent = '';
+      }
+    } else {
+      usdEl.textContent = '';
+    }
+  }
+
   // Change vs previous snapshot
   const changeEl = document.getElementById('total-change');
   if (state.snapshotIndex.length >= 2) {
@@ -478,41 +496,6 @@ function renderAssetList() {
   });
 }
 
-function renderCategoryBreakdown() {
-  const { currentItems, exchangeRates, config } = state;
-  const base = config ? config.baseCurrency : 'CNY';
-
-  const totals = {};
-  let grand = 0;
-  for (const item of currentItems) {
-    let val = item.amount;
-    if (exchangeRates && item.currency !== base) {
-      val = item.amount / (exchangeRates.rates[item.currency] || 1);
-    }
-    totals[item.category] = (totals[item.category] || 0) + val;
-    grand += val;
-  }
-
-  const listEl = document.getElementById('category-list');
-  const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
-
-  listEl.innerHTML = sorted.map(([cat, val]) => {
-    const pct = grand > 0 ? (val / grand * 100) : 0;
-    const color = CATEGORY_COLORS[cat] || CATEGORY_COLORS['其他'];
-    return `
-      <div class="category-row">
-        <div class="category-dot" style="background:${color}"></div>
-        <div class="category-name">${escHtml(cat)}</div>
-        <div class="category-bar-wrap">
-          <div class="category-bar" style="width:${pct.toFixed(1)}%;background:${color}"></div>
-        </div>
-        <div class="category-pct">${pct.toFixed(0)}%</div>
-      </div>`;
-  }).join('');
-
-  document.getElementById('category-card').classList.toggle('hidden', sorted.length === 0);
-}
-
 function getRangeCutoff(range) {
   const now = new Date();
   switch (range) {
@@ -570,10 +553,18 @@ function renderTrendChart() {
     values.push(convertTotal(entry));
   }
 
-  // Period change display
+  // Period change display — use raw totalInBase from snapshots to show true asset change
   if (data.length >= 2) {
-    const firstVal = values[0];
-    const lastVal = values[values.length - 1];
+    const firstEntry = data[0];
+    const lastEntry = data[data.length - 1];
+    // Use raw totalInBase; only convert if base currencies differ between entries
+    let firstVal = firstEntry.totalInBase;
+    let lastVal = lastEntry.totalInBase;
+    if (firstEntry.baseCurrency !== lastEntry.baseCurrency && exchangeRates) {
+      // Normalize both to current base
+      firstVal = convertTotal(firstEntry);
+      lastVal = convertTotal(lastEntry);
+    }
     const diff = lastVal - firstVal;
     const pct = firstVal > 0 ? ((diff / firstVal) * 100).toFixed(2) : 0;
     const sign = diff >= 0 ? '+' : '';
@@ -667,7 +658,7 @@ function renderSaveButton() {
 function renderAll() {
   renderTotalCard();
   renderAssetList();
-  renderCategoryBreakdown();
+
   renderTrendChart();
   renderSaveButton();
 }
@@ -729,7 +720,7 @@ function addItem(data) {
   state.currentItems.push({ ...data, assetId: uuid() });
   markDirty();
   renderAssetList();
-  renderCategoryBreakdown();
+
   renderTotalCard();
 }
 
@@ -739,7 +730,7 @@ function updateItem(assetId, data) {
     state.currentItems[idx] = { ...state.currentItems[idx], ...data };
     markDirty();
     renderAssetList();
-    renderCategoryBreakdown();
+  
     renderTotalCard();
   }
 }
@@ -748,7 +739,7 @@ function deleteItem(assetId) {
   state.currentItems = state.currentItems.filter(i => i.assetId !== assetId);
   markDirty();
   renderAssetList();
-  renderCategoryBreakdown();
+
   renderTotalCard();
 }
 
