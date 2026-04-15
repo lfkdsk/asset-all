@@ -696,18 +696,10 @@ function renderTrendChart() {
     values.push(convertTotal(entry));
   }
 
-  // Period change display — use raw totalInBase from snapshots to show true asset change
+  // Period change display — compare first and last snapshots in range (converted to current base)
   if (data.length >= 2) {
-    const firstEntry = data[0];
-    const lastEntry = data[data.length - 1];
-    // Use raw totalInBase; only convert if base currencies differ between entries
-    let firstVal = firstEntry.totalInBase;
-    let lastVal = lastEntry.totalInBase;
-    if (firstEntry.baseCurrency !== lastEntry.baseCurrency && exchangeRates) {
-      // Normalize both to current base
-      firstVal = convertTotal(firstEntry);
-      lastVal = convertTotal(lastEntry);
-    }
+    const firstVal = convertTotal(data[0]);
+    const lastVal = convertTotal(data[data.length - 1]);
     const diff = lastVal - firstVal;
     const pct = firstVal > 0 ? ((diff / firstVal) * 100).toFixed(2) : 0;
     const sign = diff >= 0 ? '+' : '';
@@ -1063,6 +1055,215 @@ function toggleMask() {
 function bindEvents() {
   // Mask toggle
   document.getElementById('btn-toggle-mask').addEventListener('click', toggleMask);
+
+  // Screenshot — pure canvas drawing
+  document.getElementById('btn-screenshot').addEventListener('click', () => {
+    const btn = document.getElementById('btn-screenshot');
+    btn.disabled = true;
+    btn.style.opacity = '0.3';
+    try {
+      const { currentItems, exchangeRates, config, viewingSnapshot } = state;
+      if (!config) return;
+      const base = config.baseCurrency;
+      const isHistorical = !!viewingSnapshot;
+      const items = isHistorical ? viewingSnapshot.items : currentItems;
+
+      // Compute values per item
+      const rows = items.map(item => {
+        let valueInBase = item.amount;
+        if (isHistorical) {
+          valueInBase = item.valueInBase ?? item.amount;
+        } else if (exchangeRates && item.currency !== base) {
+          valueInBase = item.amount / (exchangeRates.rates[item.currency] || 1);
+        }
+        return { name: item.assetName, category: item.category || '其他', currency: item.currency, amount: item.amount, valueInBase };
+      });
+      const total = rows.reduce((s, r) => s + r.valueInBase, 0);
+
+      // Canvas setup (2x for retina)
+      const S = 2;
+      const W = 420 * S;
+      const pad = 32 * S;
+      const cardPad = 24 * S;
+      const rowH = 52 * S;
+      const cardGap = 16 * S;
+      const radius = 16 * S;
+
+      // Measure total height
+      const topCardH = 140 * S;
+      const listHeaderH = 44 * S;
+      const listH = listHeaderH + rows.length * rowH + 12 * S;
+      const totalH = pad + topCardH + cardGap + listH + cardGap + 28 * S + pad;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = totalH;
+      const ctx = canvas.getContext('2d');
+
+      // Helpers
+      const roundRect = (x, y, w, h, r) => {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+      };
+      const CAT_HEX = { '现金': '#30D158', '股票': '#0A84FF', '基金': '#FF9F0A', '债券': '#BF5AF2', '房产': '#5AC8FA', '其他': '#636366' };
+
+      // Background
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, W, totalH);
+
+      // ─── Total Card ────────────────────────────────
+      let y = pad;
+      roundRect(pad, y, W - pad * 2, topCardH, radius);
+      // Gradient background
+      const grad = ctx.createLinearGradient(pad, y, W - pad, y + topCardH);
+      grad.addColorStop(0, '#0A2540');
+      grad.addColorStop(0.5, '#0D1B2A');
+      grad.addColorStop(1, '#001A33');
+      ctx.fillStyle = grad;
+      ctx.fill();
+      // Border
+      ctx.strokeStyle = 'rgba(10,132,255,0.2)';
+      ctx.lineWidth = 1 * S;
+      ctx.stroke();
+
+      let tx = pad + cardPad;
+      let ty = y + 30 * S;
+
+      // "总资产" label
+      ctx.fillStyle = 'rgba(235,235,245,0.6)';
+      ctx.font = `500 ${14 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+      ctx.textBaseline = 'top';
+      ctx.fillText('总资产', tx, ty);
+      ty += 26 * S;
+
+      // Total amount
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = `700 ${40 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+      const totalText = state.masked ? '****' : formatAmountCompact(total, base);
+      ctx.fillText(totalText, tx, ty);
+      ty += 48 * S;
+
+      // USD + change line
+      let metaX = tx;
+      // Currency badge
+      ctx.font = `600 ${12 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+      const badgeText = base;
+      const badgeW = ctx.measureText(badgeText).width + 16 * S;
+      roundRect(metaX, ty, badgeW, 22 * S, 10 * S);
+      ctx.fillStyle = 'rgba(10,132,255,0.3)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(10,132,255,0.4)';
+      ctx.lineWidth = 1 * S;
+      ctx.stroke();
+      ctx.fillStyle = '#5AC8FA';
+      ctx.fillText(badgeText, metaX + 8 * S, ty + 5 * S);
+      metaX += badgeW + 10 * S;
+
+      // Change text
+      if (!isHistorical && state.snapshotIndex.length >= 2) {
+        const prev = state.snapshotIndex[state.snapshotIndex.length - 2];
+        let prevTotal = prev.totalInBase || 0;
+        if (exchangeRates && prev.baseCurrency && prev.baseCurrency !== base) {
+          const toExBase = prev.totalInBase / (exchangeRates.rates[prev.baseCurrency] || 1);
+          prevTotal = toExBase * (exchangeRates.rates[base] || 1);
+        }
+        const diff = total - prevTotal;
+        const pct = prevTotal > 0 ? ((diff / prevTotal) * 100).toFixed(2) : 0;
+        const sign = diff >= 0 ? '+' : '';
+        ctx.fillStyle = diff >= 0 ? '#30D158' : '#FF453A';
+        ctx.font = `600 ${13 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+        const changeText = state.masked ? '****' : `${sign}${formatAmountCompact(diff, base)} (${sign}${pct}%)`;
+        ctx.fillText(changeText, metaX, ty + 4 * S);
+      }
+
+      // ─── Asset List Card ───────────────────────────
+      y = pad + topCardH + cardGap;
+      roundRect(pad, y, W - pad * 2, listH, radius);
+      ctx.fillStyle = '#1C1C1E';
+      ctx.fill();
+
+      // "资产明细" header
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = `600 ${16 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+      ctx.fillText('资产明细', pad + cardPad, y + 16 * S);
+
+      // Rows
+      let ry = y + listHeaderH;
+      rows.forEach((row, i) => {
+        const rx = pad + cardPad;
+        const rw = W - pad * 2 - cardPad * 2;
+
+        // Separator
+        if (i > 0) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+          ctx.lineWidth = 1 * S;
+          ctx.beginPath();
+          ctx.moveTo(rx, ry);
+          ctx.lineTo(rx + rw, ry);
+          ctx.stroke();
+        }
+
+        // Category dot
+        const dotR = 5 * S;
+        ctx.fillStyle = CAT_HEX[row.category] || CAT_HEX['其他'];
+        ctx.beginPath();
+        ctx.arc(rx + dotR, ry + rowH / 2, dotR, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Name
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = `500 ${15 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(row.name, rx + dotR * 2 + 12 * S, ry + rowH / 2);
+
+        // Amount (right aligned)
+        ctx.fillStyle = 'rgba(235,235,245,0.85)';
+        ctx.font = `600 ${15 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+        const amtText = state.masked ? '****' : formatAmount(row.valueInBase, base);
+        const amtW = ctx.measureText(amtText).width;
+        ctx.fillText(amtText, rx + rw - amtW, ry + rowH / 2);
+
+        ry += rowH;
+      });
+
+      ctx.textBaseline = 'top';
+
+      // ─── Footer ────────────────────────────────────
+      y = pad + topCardH + cardGap + listH + cardGap;
+      ctx.fillStyle = 'rgba(235,235,245,0.25)';
+      ctx.font = `400 ${11 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+      ctx.textAlign = 'center';
+      const dateText = isHistorical ? viewingSnapshot.date : today();
+      ctx.fillText(`资产总览 · ${dateText}`, W / 2, y);
+      ctx.textAlign = 'left';
+
+      // Export
+      canvas.toBlob(async blob => {
+        if (navigator.share && navigator.canShare) {
+          const file = new File([blob], `assets-${today()}.png`, { type: 'image/png' });
+          if (navigator.canShare({ files: [file] })) {
+            try { await navigator.share({ files: [file] }); return; } catch (_) { /* cancelled */ }
+          }
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `assets-${today()}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('截图已保存');
+      }, 'image/png');
+    } catch (err) {
+      showToast(`截图失败：${err.message}`, 3000);
+    } finally {
+      btn.disabled = false;
+      btn.style.opacity = '';
+    }
+  });
 
   // Setup form
   document.getElementById('form-setup').addEventListener('submit', async e => {

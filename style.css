@@ -310,6 +310,31 @@ body {
   pointer-events: none;
 }
 
+.screenshot-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  color: rgba(235,235,245,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  transition: background 0.2s, color 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+}
+.screenshot-btn:active {
+  background: rgba(255,255,255,0.2);
+  color: rgba(235,235,245,0.8);
+}
+
 .total-label {
   font-size: 14px;
   font-weight: 500;
