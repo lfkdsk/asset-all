@@ -1,6 +1,6 @@
 /* Service Worker — Asset Tracker PWA */
 
-const CACHE = 'asset-tracker-v3';
+const CACHE = 'asset-tracker-v4';
 const APP_SHELL = [
   './',
   './index.html',
@@ -31,16 +31,42 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
-  // Always network-first for GitHub API and exchange rate API
+  // Skip non-GET requests
+  if (e.request.method !== 'GET') return;
+
+  // Always network-first for API calls
   if (url.hostname === 'api.github.com' || url.hostname === 'api.frankfurter.dev') {
     e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
     return;
   }
 
-  // Cache-first for app shell assets
+  // Never cache version.json — always hit network
+  if (url.pathname.endsWith('/version.json')) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
+
+  // Network-first for app shell (HTML/CSS/JS), fallback to cache when offline
+  const isAppShell = url.origin === self.location.origin;
+  if (isAppShell) {
+    e.respondWith(
+      fetch(e.request)
+        .then(res => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE).then(c => c.put(e.request, clone));
+          }
+          return res;
+        })
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // Cache-first for external CDN resources (chart.js, etc.)
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request).then(res => {
-      if (res.ok && e.request.method === 'GET') {
+      if (res.ok) {
         const clone = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, clone));
       }
