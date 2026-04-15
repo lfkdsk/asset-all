@@ -315,7 +315,27 @@ body {
   font-weight: 500;
   color: rgba(235,235,245,0.6);
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+.mask-toggle {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: rgba(235,235,245,0.4);
+  display: flex;
+  align-items: center;
+  transition: color 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.mask-toggle:hover { color: rgba(235,235,245,0.7); }
+.eye-icon { width: 18px; height: 18px; }
+.eye-icon.eye-closed { display: none; }
+.masked .eye-icon.eye-open { display: none; }
+.masked .eye-icon.eye-closed { display: block; }
 
 .total-amount {
   font-size: 44px;

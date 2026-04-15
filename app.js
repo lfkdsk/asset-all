@@ -125,6 +125,7 @@ const state = {
   trendChart: null,
   chartRange: '1M',
   viewingSnapshot: null, // { date, items } when viewing a historical snapshot
+  masked: false,         // hide all asset numbers
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -141,6 +142,7 @@ function today() {
 }
 
 function formatAmount(amount, currency) {
+  if (state.masked) return '****';
   const fmt = new Intl.NumberFormat('zh-CN', {
     style: 'currency',
     currency,
@@ -151,6 +153,7 @@ function formatAmount(amount, currency) {
 }
 
 function formatAmountCompact(amount, currency) {
+  if (state.masked) return '****';
   const abs = Math.abs(amount);
   let val = amount;
   let suffix = '';
@@ -488,7 +491,7 @@ function renderTotalCard() {
         const totalUsd = base === exchangeRates.base
           ? total * usdRate
           : total / (exchangeRates.rates[base] || 1) * usdRate;
-        usdEl.textContent = `≈ ${formatAmount(totalUsd, 'USD')}`;
+        usdEl.textContent = state.masked ? '≈ ****' : `≈ ${formatAmount(totalUsd, 'USD')}`;
       } else {
         usdEl.textContent = '';
       }
@@ -517,7 +520,7 @@ function renderTotalCard() {
     const diff = total - prevTotal;
     const pct = prevTotal > 0 ? ((diff / prevTotal) * 100).toFixed(2) : 0;
     const sign = diff >= 0 ? '+' : '';
-    changeEl.textContent = `${sign}${formatAmountCompact(diff, base)} (${sign}${pct}%)`;
+    changeEl.textContent = state.masked ? '****' : `${sign}${formatAmountCompact(diff, base)} (${sign}${pct}%)`;
     changeEl.className = `total-change ${diff >= 0 ? 'positive' : 'negative'}`;
   } else {
     changeEl.textContent = '';
@@ -1051,7 +1054,16 @@ function showDashboard() {
 
 // ─── Event Listeners ──────────────────────────────────────────────────────────
 
+function toggleMask() {
+  state.masked = !state.masked;
+  document.getElementById('btn-toggle-mask').classList.toggle('masked', state.masked);
+  renderAll();
+}
+
 function bindEvents() {
+  // Mask toggle
+  document.getElementById('btn-toggle-mask').addEventListener('click', toggleMask);
+
   // Setup form
   document.getElementById('form-setup').addEventListener('submit', async e => {
     e.preventDefault();
