@@ -1158,6 +1158,25 @@ function bindEvents() {
   document.getElementById('btn-close-settings').addEventListener('click', closeSettings);
   document.getElementById('settings-overlay').addEventListener('click', closeSettings);
 
+  // Force update PWA
+  document.getElementById('btn-force-update').addEventListener('click', async () => {
+    const statusEl = document.getElementById('update-status');
+    statusEl.textContent = '正在更新...';
+    statusEl.classList.remove('hidden');
+    try {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map(r => r.unregister()));
+      }
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+      statusEl.textContent = '缓存已清除，正在重新加载...';
+      setTimeout(() => location.reload(true), 500);
+    } catch (err) {
+      statusEl.textContent = `更新失败：${err.message}`;
+    }
+  });
+
   // Settings currency change (live update)
   document.getElementById('settings-currency').addEventListener('change', async e => {
     const newBase = e.target.value;
@@ -1581,5 +1600,22 @@ document.addEventListener('DOMContentLoaded', init);
 
 // Register Service Worker for PWA
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js').catch(err => console.warn('SW registration failed:', err));
+  navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+    .then(reg => {
+      // Check for updates on every page load
+      reg.update();
+      // When a new SW is waiting, activate it immediately
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            newWorker.postMessage('skipWaiting');
+          }
+        });
+      });
+    })
+    .catch(err => console.warn('SW registration failed:', err));
+  // Reload when a new SW takes control
+  navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
 }

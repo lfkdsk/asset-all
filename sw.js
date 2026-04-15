@@ -1,6 +1,6 @@
 /* Service Worker — Asset Tracker PWA */
 
-const CACHE = 'asset-tracker-v4';
+const CACHE = 'asset-tracker-v1';
 const APP_SHELL = [
   './',
   './index.html',
@@ -28,6 +28,10 @@ self.addEventListener('activate', e => {
   );
 });
 
+self.addEventListener('message', e => {
+  if (e.data === 'skipWaiting') self.skipWaiting();
+});
+
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
@@ -37,12 +41,6 @@ self.addEventListener('fetch', e => {
   // Always network-first for API calls
   if (url.hostname === 'api.github.com' || url.hostname === 'api.frankfurter.dev') {
     e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
-    return;
-  }
-
-  // Never cache version.json — always hit network
-  if (url.pathname.endsWith('/version.json')) {
-    e.respondWith(fetch(e.request));
     return;
   }
 
