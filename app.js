@@ -327,32 +327,41 @@ const githubApi = {
     } catch { return []; }
   },
 
-  async saveIndex(cfg, indexData, existingSha) {
+  // Manages its own sha lookup + one retry on conflict, so callers can't
+  // silently drop the index update by passing a stale/null sha.
+  async saveIndex(cfg, indexData) {
     const url = `${this.baseUrl(cfg)}/contents/snapshots/index.json`;
     const content = btoa(unescape(encodeURIComponent(JSON.stringify(indexData, null, 2))));
-    const body = {
-      message: 'chore: update snapshot index',
-      content,
-      branch: cfg.branch || 'main',
+    const branch = cfg.branch || 'main';
+
+    const fetchSha = async () => {
+      const res = await fetch(url, { headers: this.headers(cfg.token) });
+      if (res.status === 404) return null;       // file doesn't exist yet
+      if (!res.ok) throw new Error(`Failed to read index.json sha: ${res.status}`);
+      const data = await res.json();
+      return data.sha || null;
     };
-    if (existingSha) body.sha = existingSha;
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: { ...this.headers(cfg.token), 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+
+    const put = async (sha) => {
+      const body = { message: 'chore: update snapshot index', content, branch };
+      if (sha) body.sha = sha;
+      return fetch(url, {
+        method: 'PUT',
+        headers: { ...this.headers(cfg.token), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    };
+
+    let res = await put(await fetchSha());
+    // 409/422 typically means sha mismatch — refresh and retry once.
+    if (res.status === 409 || res.status === 422) {
+      res = await put(await fetchSha());
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      console.warn('Failed to update index.json:', err.message);
+      throw new Error(err.message || `Failed to update index.json: ${res.status}`);
     }
-  },
-
-  async getIndexSha(cfg) {
-    const url = `${this.baseUrl(cfg)}/contents/snapshots/index.json`;
-    const res = await fetch(url, { headers: this.headers(cfg.token) });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.sha || null;
+    return res.json();
   },
 
   async getFileMeta(cfg, path) {
@@ -1017,11 +1026,7 @@ async function saveSnapshot() {
     const snapshot = buildSnapshot(state.currentItems, state.config.baseCurrency, state.exchangeRates);
     const filename = `${snapshot.snapshotDate}_${snapshot.id}.json`;
 
-    // Save snapshot + get current index SHA in parallel
-    const [, indexSha] = await Promise.all([
-      githubApi.saveSnapshot(state.config, snapshot),
-      githubApi.getIndexSha(state.config),
-    ]);
+    await githubApi.saveSnapshot(state.config, snapshot);
 
     // Update lightweight index.json manifest
     const newEntry = {
@@ -1031,7 +1036,7 @@ async function saveSnapshot() {
       filename,
     };
     const updatedIndex = [...state.snapshotIndex, newEntry];
-    await githubApi.saveIndex(state.config, updatedIndex, indexSha);
+    await githubApi.saveIndex(state.config, updatedIndex);
 
     state.snapshotIndex = updatedIndex;
     state.savedItems = state.currentItems.map(i => ({ ...i }));
@@ -1788,15 +1793,12 @@ async function saveHistoricalSnapshot() {
     };
     const filename = `${dateStr}_${snapshot.id}.json`;
 
-    const [, indexSha] = await Promise.all([
-      githubApi.saveSnapshot(state.config, snapshot),
-      githubApi.getIndexSha(state.config),
-    ]);
+    await githubApi.saveSnapshot(state.config, snapshot);
 
     const newEntry = { date: dateStr, totalInBase, baseCurrency: base, filename };
     const updatedIndex = [...state.snapshotIndex, newEntry]
       .sort((a, b) => a.date.localeCompare(b.date));
-    await githubApi.saveIndex(state.config, updatedIndex, indexSha);
+    await githubApi.saveIndex(state.config, updatedIndex);
 
     state.snapshotIndex = updatedIndex;
     saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
@@ -2026,8 +2028,7 @@ async function handleDeleteSnapshot(btn) {
 
     // Update index
     const updatedIndex = state.snapshotIndex.filter(e => e.filename !== filename);
-    const indexSha = await githubApi.getIndexSha(state.config);
-    await githubApi.saveIndex(state.config, updatedIndex, indexSha);
+    await githubApi.saveIndex(state.config, updatedIndex);
 
     state.snapshotIndex = updatedIndex;
     saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
@@ -2114,8 +2115,7 @@ async function fixHistoricalFx() {
 
     // 5. Update index.json
     progressEl.textContent = '更新 index.json...';
-    const indexSha = await githubApi.getIndexSha(state.config);
-    await githubApi.saveIndex(state.config, updatedIndex, indexSha);
+    await githubApi.saveIndex(state.config, updatedIndex);
 
     state.snapshotIndex = updatedIndex;
     saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
