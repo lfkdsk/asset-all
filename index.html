@@ -245,6 +245,12 @@
         <p id="settings-error" class="error-text hidden"></p>
       </div>
       <div class="settings-section">
+        <div class="settings-section-title">自定义资产单位</div>
+        <p class="settings-hint">如公司期权、积分等。定义"1 单位 = N 某币种"，资产录入时按数量计入。</p>
+        <div id="custom-units-list" class="custom-units-list"></div>
+        <button class="btn-secondary btn-full" id="btn-add-custom-unit" style="margin-top:8px">+ 添加单位</button>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">历史数据</div>
         <p class="settings-hint">补录指定日期的完整资产快照</p>
         <button class="btn-primary btn-full" id="btn-open-history">添加历史快照</button>
@@ -345,8 +351,9 @@
         </select>
       </div>
       <div class="form-group">
-        <label>金额</label>
-        <input type="number" id="item-amount" placeholder="0.00" step="0.01" min="0" required>
+        <label id="item-amount-label">金额</label>
+        <input type="number" id="item-amount" placeholder="0.00" step="0.0001" min="0" required>
+        <span id="item-amount-preview" class="form-hint hidden"></span>
       </div>
       <div class="form-group">
         <label>备注（可选）</label>
@@ -388,6 +395,47 @@
       </button>
       <p id="history-error" class="error-text hidden"></p>
     </div>
+  </div>
+</div>
+
+<!-- Custom Unit Edit Modal -->
+<div id="modal-unit" class="modal hidden">
+  <div class="modal-overlay" id="unit-modal-overlay"></div>
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <h2 id="modal-unit-title">添加自定义单位</h2>
+      <button class="icon-btn" id="btn-close-unit-modal">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <form id="form-unit" class="modal-body">
+      <input type="hidden" id="unit-original-code">
+      <div class="form-group">
+        <label>单位代码</label>
+        <input type="text" id="unit-code" placeholder="如 OPT_ACME" maxlength="20" required>
+        <span class="form-hint">字母数字下划线，作为"币种"代号唯一标识</span>
+      </div>
+      <div class="form-group">
+        <label>显示名称</label>
+        <input type="text" id="unit-name" placeholder="如 Acme 期权" maxlength="40" required>
+      </div>
+      <div class="form-group">
+        <label>单价</label>
+        <input type="number" id="unit-price" placeholder="100" step="0.0001" min="0" required>
+      </div>
+      <div class="form-group">
+        <label>计价币种</label>
+        <select id="unit-price-currency"></select>
+        <span class="form-hint">1 个该单位 = 单价 × 计价币种</span>
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="btn-primary btn-full" id="btn-unit-save">保存</button>
+        <button type="button" class="btn-danger btn-full hidden" id="btn-unit-delete">删除此单位</button>
+      </div>
+      <p id="unit-error" class="error-text hidden"></p>
+    </form>
   </div>
 </div>
 

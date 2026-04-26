@@ -8,6 +8,22 @@
 
 const STORAGE_KEY = 'asset_tracker_config';
 
+const REAL_CURRENCIES = [
+  'CNY','USD','EUR','HKD','JPY','GBP','SGD','AUD','CAD','CHF',
+  'INR','KRW','BRL','MXN','SEK','NOK','DKK','NZD','ZAR','THB',
+  'MYR','IDR','PHP','TRY','PLN','CZK','HUF','RON','ISK','ILS',
+];
+
+const CURRENCY_NAMES = {
+  CNY: '人民币', USD: '美元', EUR: '欧元', HKD: '港元', JPY: '日元',
+  GBP: '英镑', SGD: '新加坡元', AUD: '澳元', CAD: '加元', CHF: '瑞士法郎',
+  INR: '印度卢比', KRW: '韩元', BRL: '巴西雷亚尔', MXN: '墨西哥比索',
+  SEK: '瑞典克朗', NOK: '挪威克朗', DKK: '丹麦克朗', NZD: '新西兰元',
+  ZAR: '南非兰特', THB: '泰铢', MYR: '马来西亚令吉', IDR: '印尼盾',
+  PHP: '菲律宾比索', TRY: '土耳其里拉', PLN: '波兰兹罗提', CZK: '捷克克朗',
+  HUF: '匈牙利福林', RON: '罗马尼亚列伊', ISK: '冰岛克朗', ILS: '以色列谢克尔',
+};
+
 const KNOWN_INSTITUTIONS = [
   // 中国商业银行
   '招商银行', '工商银行', '建设银行', '农业银行', '中国银行', '交通银行',
@@ -124,8 +140,10 @@ const state = {
   isDirty: false,
   trendChart: null,
   chartRange: '1M',
-  viewingSnapshot: null, // { date, items } when viewing a historical snapshot
+  viewingSnapshot: null, // { date, items, customUnits } when viewing a historical snapshot
   masked: false,         // hide all asset numbers
+  customUnits: [],       // user-defined units, e.g. [{code, name, unitPrice, priceCurrency}]
+  customUnitsSha: null,  // GitHub blob sha for config/custom-units.json
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -150,6 +168,48 @@ function formatAmount(amount, currency) {
     maximumFractionDigits: currency === 'JPY' || currency === 'KRW' || currency === 'IDR' ? 0 : 2,
   });
   try { return fmt.format(amount); } catch { return `${currency} ${amount.toFixed(2)}`; }
+}
+
+// Look up a custom unit definition by code from the given list (or current state).
+function findCustomUnit(code, units) {
+  const list = units || state.customUnits;
+  if (!code || !list) return null;
+  return list.find(u => u.code === code) || null;
+}
+
+function isCustomUnitCode(code, units) {
+  return !!findCustomUnit(code, units);
+}
+
+// Convert `amount` (in `currency`, which may be a custom unit) to `baseCurrency`.
+// Returns NaN-safe number; returns `amount` unchanged when rates are missing.
+function convertToBase(amount, currency, baseCurrency, exchangeRates, customUnits) {
+  if (amount == null || isNaN(amount)) return 0;
+  const unit = findCustomUnit(currency, customUnits);
+  if (unit) {
+    const inPriceCurrency = amount * (unit.unitPrice || 0);
+    return convertToBase(inPriceCurrency, unit.priceCurrency, baseCurrency, exchangeRates, customUnits);
+  }
+  if (currency === baseCurrency) return amount;
+  if (!exchangeRates || !exchangeRates.rates) return amount;
+  // Same logic as fxApi.convert: rates are relative to exchangeRates.base
+  const exBase = exchangeRates.base;
+  if (currency === exBase) return amount * (exchangeRates.rates[baseCurrency] || 1);
+  if (baseCurrency === exBase) return amount / (exchangeRates.rates[currency] || 1);
+  const toExBase = amount / (exchangeRates.rates[currency] || 1);
+  return toExBase * (exchangeRates.rates[baseCurrency] || 1);
+}
+
+// Format an amount labeled by its currency code. For custom units, render
+// "1,000 期权" rather than relying on Intl currency formatting.
+function formatAssetAmount(amount, currency, customUnits) {
+  if (state.masked) return '****';
+  const unit = findCustomUnit(currency, customUnits);
+  if (unit) {
+    const num = Number(amount).toLocaleString('zh-CN', { maximumFractionDigits: 4 });
+    return `${num} ${unit.name || unit.code}`;
+  }
+  return formatAmount(amount, currency);
 }
 
 function formatAmountCompact(amount, currency) {
@@ -356,6 +416,40 @@ const githubApi = {
     return res.json();
   },
 
+  async fetchCustomUnits(cfg) {
+    const url = `${this.baseUrl(cfg)}/contents/config/custom-units.json`;
+    const res = await fetch(url, { headers: this.headers(cfg.token) });
+    if (res.status === 404) return { units: [], sha: null };
+    if (!res.ok) return { units: [], sha: null };
+    const data = await res.json();
+    try {
+      const json = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\s/g, '')))));
+      return { units: Array.isArray(json) ? json : [], sha: data.sha || null };
+    } catch { return { units: [], sha: data.sha || null }; }
+  },
+
+  async saveCustomUnits(cfg, units, existingSha) {
+    const url = `${this.baseUrl(cfg)}/contents/config/custom-units.json`;
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(units, null, 2))));
+    const body = {
+      message: 'chore: update custom units',
+      content,
+      branch: cfg.branch || 'main',
+    };
+    if (existingSha) body.sha = existingSha;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { ...this.headers(cfg.token), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Save failed: ${res.status}`);
+    }
+    const data = await res.json();
+    return data.content?.sha || null;
+  },
+
   async testConnection(cfg) {
     const url = `${this.baseUrl(cfg)}`;
     const res = await fetch(url, { headers: this.headers(cfg.token) });
@@ -399,12 +493,13 @@ const fxApi = {
 
 const CACHE_KEY = 'asset_tracker_cache';
 
-function saveLocalCache(items, snapshotIndex, baseCurrency) {
+function saveLocalCache(items, snapshotIndex, baseCurrency, customUnits) {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify({
       items,
       snapshotIndex,
       baseCurrency,
+      customUnits: customUnits || state.customUnits || [],
       cachedAt: new Date().toISOString(),
     }));
   } catch (_) { /* storage full or unavailable — ignore */ }
@@ -419,12 +514,11 @@ function loadLocalCache() {
 
 // ─── Snapshot Builder ─────────────────────────────────────────────────────────
 
-function buildSnapshot(items, baseCurrency, exchangeRates) {
+function buildSnapshot(items, baseCurrency, exchangeRates, customUnits) {
+  const units = customUnits || state.customUnits || [];
   const processedItems = items.map(item => {
-    const fxRate = item.currency === baseCurrency
-      ? 1
-      : (exchangeRates ? (1 / (exchangeRates.rates[item.currency] || 1)) : 1);
-    const valueInBase = item.amount * fxRate;
+    const valueInBase = convertToBase(item.amount, item.currency, baseCurrency, exchangeRates, units);
+    const fxRate = item.amount ? valueInBase / item.amount : 1;
     return {
       assetId: item.assetId,
       assetName: item.assetName,
@@ -439,6 +533,12 @@ function buildSnapshot(items, baseCurrency, exchangeRates) {
 
   const totalInBase = processedItems.reduce((sum, i) => sum + i.valueInBase, 0);
 
+  // Embed only the custom unit definitions actually referenced — keeps
+  // historical snapshots accurate even if unit prices are edited later.
+  const usedCodes = new Set(items.map(i => i.currency));
+  const referencedUnits = units.filter(u => usedCodes.has(u.code))
+    .map(u => ({ code: u.code, name: u.name, unitPrice: u.unitPrice, priceCurrency: u.priceCurrency }));
+
   return {
     version: 1,
     id: uuid(),
@@ -446,6 +546,7 @@ function buildSnapshot(items, baseCurrency, exchangeRates) {
     createdAt: new Date().toISOString(),
     baseCurrency,
     items: processedItems,
+    customUnits: referencedUnits,
     totalInBase,
   };
 }
@@ -472,10 +573,7 @@ function renderTotalCard() {
     }
   } else if (exchangeRates) {
     total = currentItems.reduce((sum, item) => {
-      const val = item.currency === base
-        ? item.amount
-        : item.amount / (exchangeRates.rates[item.currency] || 1);
-      return sum + val;
+      return sum + convertToBase(item.amount, item.currency, base, exchangeRates, state.customUnits);
     }, 0);
   }
 
@@ -539,6 +637,11 @@ function renderTotalCard() {
       const heldCurrencies = [...new Set(currentItems.map(i => i.currency))].filter(c => c !== base).sort();
       if (heldCurrencies.length > 0) {
         fxTooltip.innerHTML = heldCurrencies.map(c => {
+          const unit = findCustomUnit(c);
+          if (unit) {
+            const oneUnit = convertToBase(1, c, base, exchangeRates, state.customUnits);
+            return `<div>1 ${unit.name || c} = ${oneUnit.toFixed(4)} ${base}</div>`;
+          }
           const rate = 1 / (exchangeRates.rates[c] || 1);
           return `<div>1 ${c} = ${rate.toFixed(4)} ${base}</div>`;
         }).join('');
@@ -578,14 +681,16 @@ function renderAssetList() {
       ? `<img class="asset-logo" src="https://icon.horse/icon/${domain}" alt="" onerror="this.outerHTML='<span>${fallback}</span>'">`
       : `<span>${fallback}</span>`;
 
+    // Pick the right custom unit table: snapshots embed their own.
+    const unitTable = isHistorical
+      ? (viewingSnapshot.customUnits || [])
+      : state.customUnits;
+
     let valueInBase;
     if (isHistorical) {
       valueInBase = item.valueInBase ?? item.amount;
     } else {
-      valueInBase = item.amount;
-      if (exchangeRates && item.currency !== base) {
-        valueInBase = item.amount / (exchangeRates.rates[item.currency] || 1);
-      }
+      valueInBase = convertToBase(item.amount, item.currency, base, exchangeRates, unitTable);
     }
     const showOrig = item.currency !== base;
     return `
@@ -599,7 +704,7 @@ function renderAssetList() {
         </div>
         <div class="asset-amounts">
           <div class="asset-value-base">${formatAmount(valueInBase, base)}</div>
-          ${showOrig ? `<div class="asset-value-orig">${formatAmount(item.amount, item.currency)}</div>` : ''}
+          ${showOrig ? `<div class="asset-value-orig">${formatAssetAmount(item.amount, item.currency, unitTable)}</div>` : ''}
         </div>
       </div>`;
   }).join('');
@@ -622,7 +727,12 @@ async function loadSnapshotView(entry) {
 
   try {
     const snapshot = await githubApi.fetchSnapshot(state.config, entry.filename);
-    state.viewingSnapshot = { date: entry.date, items: snapshot.items, baseCurrency: snapshot.baseCurrency };
+    state.viewingSnapshot = {
+      date: entry.date,
+      items: snapshot.items,
+      baseCurrency: snapshot.baseCurrency,
+      customUnits: snapshot.customUnits || [],
+    };
     dateEl.textContent = `查看快照：${entry.date}`;
     renderTotalCard();
     renderAssetList();
@@ -818,16 +928,20 @@ function renderAll() {
 async function loadData() {
   setLoading(true);
   try {
-    // Parallel: fetch snapshot list, exchange rates, and index.json manifest
-    const [snapshotMeta, rates, snapshotIndex] = await Promise.all([
+    // Parallel: fetch snapshot list, exchange rates, index.json manifest, custom units
+    const [snapshotMeta, rates, snapshotIndex, customUnitsRes] = await Promise.all([
       githubApi.listSnapshots(state.config),
       fxApi.fetchRates(state.config.baseCurrency),
       githubApi.fetchIndex(state.config),
+      githubApi.fetchCustomUnits(state.config),
     ]);
 
     state.snapshotMeta = snapshotMeta;
     state.exchangeRates = rates;
     state.snapshotIndex = snapshotIndex;
+    state.customUnits = customUnitsRes.units;
+    state.customUnitsSha = customUnitsRes.sha;
+    populateCurrencySelects();
 
     // Update FX date in settings
     const fxDateEl = document.getElementById('fx-rate-date');
@@ -937,10 +1051,46 @@ async function saveSnapshot() {
   }
 }
 
+// ─── Currency Select Population ───────────────────────────────────────────────
+
+// Rebuild the item modal's currency <select> so it includes both real
+// currencies and any user-defined custom units. The base-currency selectors
+// (#setup-currency / #settings-currency) are NOT touched — base must stay real.
+function populateCurrencySelects() {
+  const sel = document.getElementById('item-currency');
+  if (!sel) return;
+  const prev = sel.value;
+  const real = REAL_CURRENCIES.map(c =>
+    `<option value="${c}">${c} — ${CURRENCY_NAMES[c] || c}</option>`
+  ).join('');
+  const customs = (state.customUnits || []).map(u =>
+    `<option value="${escHtml(u.code)}">🪙 ${escHtml(u.code)} — ${escHtml(u.name || '')}</option>`
+  ).join('');
+  const grouped = customs
+    ? `<optgroup label="货币">${real}</optgroup><optgroup label="自定义单位">${customs}</optgroup>`
+    : real;
+  sel.innerHTML = grouped;
+  if (prev) sel.value = prev;
+}
+
+// Build <option> markup for an inline currency select (history rows).
+function currencyOptionsHtml(selected) {
+  const real = REAL_CURRENCIES.map(c =>
+    `<option value="${c}" ${c === selected ? 'selected' : ''}>${c}</option>`
+  ).join('');
+  const customs = (state.customUnits || []).map(u =>
+    `<option value="${escHtml(u.code)}" ${u.code === selected ? 'selected' : ''}>🪙 ${escHtml(u.code)}</option>`
+  ).join('');
+  return customs
+    ? `<optgroup label="货币">${real}</optgroup><optgroup label="自定义">${customs}</optgroup>`
+    : real;
+}
+
 // ─── Modals ───────────────────────────────────────────────────────────────────
 
 function openAddModal() {
   const modal = document.getElementById('modal-item');
+  populateCurrencySelects();
   document.getElementById('modal-item-title').textContent = '添加资产';
   document.getElementById('item-id').value = '';
   document.getElementById('item-name').value = '';
@@ -949,6 +1099,7 @@ function openAddModal() {
   document.getElementById('item-amount').value = '';
   document.getElementById('item-notes').value = '';
   document.getElementById('btn-item-delete').classList.add('hidden');
+  refreshItemAmountUi();
   modal.classList.remove('hidden');
   setTimeout(() => document.getElementById('item-name').focus(), 100);
 }
@@ -957,6 +1108,7 @@ function openEditModal(assetId) {
   const item = state.currentItems.find(i => i.assetId === assetId);
   if (!item) return;
   const modal = document.getElementById('modal-item');
+  populateCurrencySelects();
   document.getElementById('modal-item-title').textContent = '编辑资产';
   document.getElementById('item-id').value = item.assetId;
   document.getElementById('item-name').value = item.assetName;
@@ -965,7 +1117,40 @@ function openEditModal(assetId) {
   document.getElementById('item-amount').value = item.amount;
   document.getElementById('item-notes').value = item.notes || '';
   document.getElementById('btn-item-delete').classList.remove('hidden');
+  refreshItemAmountUi();
   modal.classList.remove('hidden');
+}
+
+// Switch between "金额" and "数量" mode based on whether the selected currency
+// is a custom unit, and refresh the unit-price preview line.
+function refreshItemAmountUi() {
+  const code = document.getElementById('item-currency').value;
+  const labelEl = document.getElementById('item-amount-label');
+  const previewEl = document.getElementById('item-amount-preview');
+  const amountEl = document.getElementById('item-amount');
+  const unit = findCustomUnit(code);
+  const base = state.config?.baseCurrency || 'CNY';
+
+  if (unit) {
+    labelEl.textContent = '数量';
+    amountEl.placeholder = '0';
+    const qty = parseFloat(amountEl.value) || 0;
+    const inPriceCcy = qty * unit.unitPrice;
+    const inBase = convertToBase(qty, code, base, state.exchangeRates, state.customUnits);
+    const unitPriceText = `${Number(unit.unitPrice).toLocaleString('zh-CN', { maximumFractionDigits: 4 })} ${unit.priceCurrency}`;
+    if (qty > 0) {
+      const inPriceCcyText = formatAmount(inPriceCcy, unit.priceCurrency);
+      const inBaseText = unit.priceCurrency === base ? '' : ` ≈ ${formatAmount(inBase, base)}`;
+      previewEl.textContent = `× ${unitPriceText}/单位 = ${inPriceCcyText}${inBaseText}`;
+    } else {
+      previewEl.textContent = `单价 ${unitPriceText} / 单位`;
+    }
+    previewEl.classList.remove('hidden');
+  } else {
+    labelEl.textContent = '金额';
+    amountEl.placeholder = '0.00';
+    previewEl.classList.add('hidden');
+  }
 }
 
 function closeModal() {
@@ -991,6 +1176,8 @@ function openSettings() {
 
   // Render snapshot management list
   renderSnapshotManageList();
+  // Render custom units list
+  renderCustomUnitsList();
 }
 
 function closeSettings() {
@@ -1069,12 +1256,15 @@ function bindEvents() {
       const items = isHistorical ? viewingSnapshot.items : currentItems;
 
       // Compute values per item
+      const unitTable = isHistorical
+        ? (viewingSnapshot.customUnits || [])
+        : state.customUnits;
       const rows = items.map(item => {
         let valueInBase = item.amount;
         if (isHistorical) {
           valueInBase = item.valueInBase ?? item.amount;
-        } else if (exchangeRates && item.currency !== base) {
-          valueInBase = item.amount / (exchangeRates.rates[item.currency] || 1);
+        } else if (exchangeRates) {
+          valueInBase = convertToBase(item.amount, item.currency, base, exchangeRates, unitTable);
         }
         return { name: item.assetName, category: item.category || '其他', currency: item.currency, amount: item.amount, valueInBase };
       });
@@ -1324,6 +1514,10 @@ function bindEvents() {
   document.getElementById('btn-close-modal').addEventListener('click', closeModal);
   document.getElementById('item-modal-overlay').addEventListener('click', closeModal);
 
+  // Item modal: live-refresh the amount/quantity UI
+  document.getElementById('item-currency').addEventListener('change', refreshItemAmountUi);
+  document.getElementById('item-amount').addEventListener('input', refreshItemAmountUi);
+
   // Item form submit
   document.getElementById('form-item').addEventListener('submit', e => {
     e.preventDefault();
@@ -1434,6 +1628,13 @@ function bindEvents() {
   document.getElementById('btn-history-add-item').addEventListener('click', addHistoryRow);
   document.getElementById('btn-save-history').addEventListener('click', saveHistoricalSnapshot);
 
+  // Custom unit modal
+  document.getElementById('btn-add-custom-unit').addEventListener('click', () => openUnitModal(null));
+  document.getElementById('btn-close-unit-modal').addEventListener('click', closeUnitModal);
+  document.getElementById('unit-modal-overlay').addEventListener('click', closeUnitModal);
+  document.getElementById('form-unit').addEventListener('submit', handleSaveCustomUnit);
+  document.getElementById('btn-unit-delete').addEventListener('click', handleDeleteCustomUnit);
+
   // Setup autocomplete
   setupAutocomplete();
 }
@@ -1473,19 +1674,19 @@ function removeHistoryRow(idx) {
 
 function renderHistoryItems() {
   const list = document.getElementById('history-items-list');
-  const baseCurrency = state.config?.baseCurrency || 'CNY';
-  const currencies = ['CNY','USD','EUR','HKD','JPY','GBP','SGD','AUD','CAD','CHF'];
 
-  list.innerHTML = historyItems.map((item, i) => `
+  list.innerHTML = historyItems.map((item, i) => {
+    const isUnit = isCustomUnitCode(item.currency);
+    return `
     <div class="history-item-row">
       <input type="text" placeholder="资产名称" value="${escHtml(item.assetName)}" data-idx="${i}" data-field="assetName">
       <select data-idx="${i}" data-field="currency">
-        ${currencies.map(c => `<option value="${c}" ${c === item.currency ? 'selected' : ''}>${c}</option>`).join('')}
+        ${currencyOptionsHtml(item.currency)}
       </select>
-      <input type="number" placeholder="金额" step="0.01" min="0" value="${item.amount || ''}" data-idx="${i}" data-field="amount">
+      <input type="number" placeholder="${isUnit ? '数量' : '金额'}" step="0.01" min="0" value="${item.amount || ''}" data-idx="${i}" data-field="amount">
       <button type="button" class="btn-remove-row" data-idx="${i}">&times;</button>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
   // Bind input changes
   list.querySelectorAll('input, select').forEach(el => {
@@ -1509,11 +1710,7 @@ function updateHistoryTotal() {
   const base = state.config?.baseCurrency || 'CNY';
   let total = 0;
   for (const item of historyItems) {
-    if (item.currency === base) {
-      total += item.amount;
-    } else if (state.exchangeRates) {
-      total += item.amount / (state.exchangeRates.rates[item.currency] || 1);
-    }
+    total += convertToBase(item.amount, item.currency, base, state.exchangeRates, state.customUnits);
   }
   const el = document.getElementById('history-total');
   const count = historyItems.filter(i => i.assetName && i.amount > 0).length;
@@ -1555,10 +1752,10 @@ async function saveHistoricalSnapshot() {
 
     textEl.textContent = '保存中...';
 
+    const units = state.customUnits || [];
     const processedItems = validItems.map(item => {
-      const fxRate = item.currency === base
-        ? 1
-        : (1 / (historicalRates.rates[item.currency] || 1));
+      const valueInBase = convertToBase(item.amount, item.currency, base, historicalRates, units);
+      const fxRate = item.amount ? valueInBase / item.amount : 1;
       return {
         assetId: uuid(),
         assetName: item.assetName.trim(),
@@ -1567,11 +1764,14 @@ async function saveHistoricalSnapshot() {
         amount: item.amount,
         notes: '',
         fxRateToBase: fxRate,
-        valueInBase: item.amount * fxRate,
+        valueInBase,
       };
     });
 
     const totalInBase = processedItems.reduce((sum, i) => sum + i.valueInBase, 0);
+    const usedCodes = new Set(validItems.map(i => i.currency));
+    const referencedUnits = units.filter(u => usedCodes.has(u.code))
+      .map(u => ({ code: u.code, name: u.name, unitPrice: u.unitPrice, priceCurrency: u.priceCurrency }));
     const snapshot = {
       version: 1,
       id: uuid(),
@@ -1580,6 +1780,7 @@ async function saveHistoricalSnapshot() {
       baseCurrency: base,
       fxDate: historicalRates.date,
       items: processedItems,
+      customUnits: referencedUnits,
       totalInBase,
     };
     const filename = `${dateStr}_${snapshot.id}.json`;
@@ -1607,6 +1808,173 @@ async function saveHistoricalSnapshot() {
   } finally {
     btn.disabled = false;
     textEl.textContent = '保存快照';
+  }
+}
+
+// ─── Custom Units Management ─────────────────────────────────────────────────
+
+function renderCustomUnitsList() {
+  const container = document.getElementById('custom-units-list');
+  if (!container) return;
+  const units = state.customUnits || [];
+
+  if (units.length === 0) {
+    container.innerHTML = '<p class="custom-units-empty">暂无自定义单位</p>';
+    return;
+  }
+
+  container.innerHTML = units.map(u => `
+    <div class="custom-unit-row" data-code="${escHtml(u.code)}">
+      <div class="custom-unit-info">
+        <span class="custom-unit-name">${escHtml(u.name)} <span class="custom-unit-code">${escHtml(u.code)}</span></span>
+        <span class="custom-unit-price">1 = ${Number(u.unitPrice).toLocaleString('zh-CN', { maximumFractionDigits: 4 })} ${escHtml(u.priceCurrency)}</span>
+      </div>
+      <button class="btn-edit-unit" data-code="${escHtml(u.code)}">编辑</button>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('.btn-edit-unit').forEach(btn => {
+    btn.addEventListener('click', () => openUnitModal(btn.dataset.code));
+  });
+}
+
+function openUnitModal(code) {
+  const modal = document.getElementById('modal-unit');
+  const sel = document.getElementById('unit-price-currency');
+  // Populate price-currency select with real currencies only
+  sel.innerHTML = REAL_CURRENCIES.map(c =>
+    `<option value="${c}">${c} — ${CURRENCY_NAMES[c] || c}</option>`
+  ).join('');
+
+  document.getElementById('unit-error').classList.add('hidden');
+
+  if (code) {
+    const unit = findCustomUnit(code);
+    if (!unit) return;
+    document.getElementById('modal-unit-title').textContent = '编辑自定义单位';
+    document.getElementById('unit-original-code').value = unit.code;
+    document.getElementById('unit-code').value = unit.code;
+    document.getElementById('unit-name').value = unit.name;
+    document.getElementById('unit-price').value = unit.unitPrice;
+    document.getElementById('unit-price-currency').value = unit.priceCurrency;
+    document.getElementById('btn-unit-delete').classList.remove('hidden');
+  } else {
+    document.getElementById('modal-unit-title').textContent = '添加自定义单位';
+    document.getElementById('unit-original-code').value = '';
+    document.getElementById('unit-code').value = '';
+    document.getElementById('unit-name').value = '';
+    document.getElementById('unit-price').value = '';
+    document.getElementById('unit-price-currency').value = state.config?.baseCurrency || 'USD';
+    document.getElementById('btn-unit-delete').classList.add('hidden');
+  }
+
+  modal.classList.remove('hidden');
+  setTimeout(() => document.getElementById('unit-code').focus(), 100);
+}
+
+function closeUnitModal() {
+  document.getElementById('modal-unit').classList.add('hidden');
+}
+
+async function persistCustomUnits(units) {
+  if (!state.config) throw new Error('请先配置 GitHub');
+  const newSha = await githubApi.saveCustomUnits(state.config, units, state.customUnitsSha);
+  state.customUnits = units;
+  if (newSha) state.customUnitsSha = newSha;
+  populateCurrencySelects();
+  saveLocalCache(state.currentItems, state.snapshotIndex, state.config.baseCurrency);
+}
+
+async function handleSaveCustomUnit(e) {
+  e.preventDefault();
+  const errEl = document.getElementById('unit-error');
+  errEl.classList.add('hidden');
+
+  const originalCode = document.getElementById('unit-original-code').value;
+  const code = document.getElementById('unit-code').value.trim().toUpperCase();
+  const name = document.getElementById('unit-name').value.trim();
+  const unitPrice = parseFloat(document.getElementById('unit-price').value);
+  const priceCurrency = document.getElementById('unit-price-currency').value;
+
+  if (!/^[A-Z0-9_]{1,20}$/.test(code)) {
+    errEl.textContent = '代码只能包含字母数字下划线（≤20 字符）';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  if (REAL_CURRENCIES.includes(code)) {
+    errEl.textContent = `代码不能与真实币种 ${code} 冲突`;
+    errEl.classList.remove('hidden');
+    return;
+  }
+  if (!(unitPrice > 0)) {
+    errEl.textContent = '单价必须大于 0';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  const isEdit = !!originalCode;
+  const others = (state.customUnits || []).filter(u => u.code !== originalCode);
+  if (others.some(u => u.code === code)) {
+    errEl.textContent = `已存在相同代码 ${code}`;
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  const newUnits = [...others, { code, name, unitPrice, priceCurrency }]
+    .sort((a, b) => a.code.localeCompare(b.code));
+
+  const btn = document.getElementById('btn-unit-save');
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+  try {
+    await persistCustomUnits(newUnits);
+    // If renamed, propagate code change to current items.
+    if (isEdit && originalCode !== code) {
+      let touched = false;
+      state.currentItems.forEach(it => {
+        if (it.currency === originalCode) { it.currency = code; touched = true; }
+      });
+      if (touched) markDirty();
+    }
+    closeUnitModal();
+    renderCustomUnitsList();
+    renderAll();
+    showToast('已保存 ✓');
+  } catch (err) {
+    errEl.textContent = `保存失败：${err.message}`;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存';
+  }
+}
+
+async function handleDeleteCustomUnit() {
+  const code = document.getElementById('unit-original-code').value;
+  if (!code) return;
+
+  const usedByCurrent = state.currentItems.some(i => i.currency === code);
+  if (usedByCurrent) {
+    if (!confirm(`仍有当前资产使用「${code}」。删除后这些资产将无法估值，确定继续？`)) return;
+  } else {
+    if (!confirm(`删除自定义单位「${code}」？历史快照不受影响。`)) return;
+  }
+
+  const newUnits = (state.customUnits || []).filter(u => u.code !== code);
+  const btn = document.getElementById('btn-unit-delete');
+  btn.disabled = true;
+  btn.textContent = '删除中...';
+  try {
+    await persistCustomUnits(newUnits);
+    closeUnitModal();
+    renderCustomUnitsList();
+    renderAll();
+    showToast('已删除 ✓');
+  } catch (err) {
+    showToast(`删除失败：${err.message}`, 4000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '删除此单位';
   }
 }
 
@@ -1704,13 +2072,13 @@ async function fixHistoricalFx() {
       const base = snapshot.baseCurrency;
       const historicalRates = await fxApi.fetchRates(base, entry.date);
 
-      // 3. Recalculate each item
+      // 3. Recalculate each item — use the snapshot's embedded customUnits so
+      //    custom-unit valuations are recomputed from frozen unit prices + new FX.
+      const snapUnits = snapshot.customUnits || [];
       let changed = false;
       for (const item of snapshot.items) {
-        const newRate = item.currency === base
-          ? 1
-          : (1 / (historicalRates.rates[item.currency] || 1));
-        const newValue = item.amount * newRate;
+        const newValue = convertToBase(item.amount, item.currency, base, historicalRates, snapUnits);
+        const newRate = item.amount ? newValue / item.amount : 1;
         if (Math.abs(newRate - (item.fxRateToBase || 1)) > 1e-8) {
           changed = true;
         }
@@ -1791,6 +2159,8 @@ async function init() {
     state.currentItems = cache.items.map(i => ({ ...i }));
     state.savedItems = cache.items.map(i => ({ ...i }));
     state.snapshotIndex = cache.snapshotIndex || [];
+    state.customUnits = cache.customUnits || [];
+    populateCurrencySelects();
     renderAll();
   }
 
