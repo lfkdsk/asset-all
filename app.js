@@ -1565,6 +1565,9 @@ function bindEvents() {
       }
       const keys = await caches.keys();
       await Promise.all(keys.map(k => caches.delete(k)));
+      // Drop the local snapshot/index cache so next load pulls fresh from GitHub.
+      // Keep STORAGE_KEY (GitHub config) so the user doesn't need to reauth.
+      localStorage.removeItem(CACHE_KEY);
       statusEl.textContent = '缓存已清除，正在重新加载...';
       setTimeout(() => location.reload(true), 500);
     } catch (err) {
