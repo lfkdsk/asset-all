@@ -58,9 +58,23 @@ your-repo/
    - **Repository name**：取一个名字，如 `my-assets`
    - **Visibility**：选择 **Private**（强烈建议，保护你的财务数据）
 4. 点击 **Create repository**
-5. 记下你的 GitHub 用户名和仓库名，稍后需要用到
 
-### 2. 创建 GitHub Personal Access Token
+### 2. 登录并连接仓库（推荐：GitHub OAuth）
+
+1. 访问应用页面（部署到 GitHub Pages 或本地打开 `index.html`）
+2. 在首次设置页面点击 **使用 GitHub 登录**，跳转到 GitHub 授权 `repo` 权限
+3. 授权完成后回到应用，填入：
+   - **仓库所有者**：默认填好你的账户，组织仓库可改
+   - **仓库名称**：第一步创建的仓库名
+   - **分支**：默认 `main`
+   - **本位币**：选择你的主要货币（如 CNY）
+4. 点击 **开始使用**
+
+OAuth 走的是统一的 [lfkdsk-auth Worker](https://auth.lfkdsk.org/)，前端只看到公开的 `client_id`，`client_secret` 始终留在 Worker 里。
+
+### 备选：使用 Personal Access Token
+
+如果不想走 OAuth（例如自部署、走 GHE，或偏好 fine-grained token），在登录页点 **使用 Personal Access Token** 切换到 Token 输入框。
 
 1. 前往 GitHub Token 设置页：点击头像 → **Settings** → 左侧栏最底部 **Developer settings** → **Personal access tokens** → **Fine-grained tokens**
 2. 点击 **Generate new token**
@@ -71,20 +85,9 @@ your-repo/
    - **Permissions** → **Repository permissions**：
      - **Contents**：设为 **Read and write**（用于读写快照文件）
 4. 点击 **Generate token**
-5. **立即复制 Token**（格式为 `github_pat_xxxx`），页面关闭后将无法再次查看
+5. **立即复制 Token**（格式为 `github_pat_xxxx`），粘贴回应用继续
 
 > 也可以使用 Classic Token：前往 **Personal access tokens** → **Tokens (classic)** → **Generate new token**，勾选 `repo` 权限即可。Classic Token 格式为 `ghp_xxxx`。
-
-### 3. 配置应用
-
-1. 访问应用页面（部署到 GitHub Pages 或本地打开 `index.html`）
-2. 在首次设置页面填入：
-   - **GitHub Token**：粘贴上一步复制的 Token
-   - **仓库所有者**：你的 GitHub 用户名
-   - **仓库名称**：第一步创建的仓库名
-   - **分支**：默认 `main`
-   - **本位币**：选择你的主要货币（如 CNY）
-3. 点击 **开始使用**
 
 ## 部署方式
 
@@ -111,6 +114,7 @@ your-repo/
 ## 隐私与安全
 
 - **数据完全自托管**：所有资产数据存储在你自己的 GitHub 私有仓库中
-- **无后端服务器**：应用纯前端运行，不经过任何第三方服务器
+- **无第三方数据后端**：应用纯前端运行，资产数据不经过任何中间服务器
+- **OAuth 中转层最小化**：仅用一个共享的 Cloudflare Worker（[lfkdsk-auth](https://github.com/lfkdsk/lfkdsk-auth)）持有 OAuth `client_secret` 并把 `code` 换成 `access_token`。换出的 token 通过 URL fragment 直接交给浏览器，Worker 不持久化任何凭据
 - **Token 本地存储**：GitHub Token 仅保存在浏览器 localStorage 中
-- **建议使用私有仓库**，并为 Token 设置最小权限（仅限单个仓库的 Contents 读写）
+- **建议使用私有仓库**，并优先使用 fine-grained Token 仅授权该仓库的 Contents 读写

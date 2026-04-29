@@ -8,6 +8,15 @@
 
 const STORAGE_KEY = 'asset_tracker_config';
 
+// GitHub OAuth — public values; the secret lives in the lfkdsk-auth
+// Worker. Frontend kicks off authorize, the Worker exchanges the code,
+// and bounces back to assets.lfkdsk.org/#oauth_token=… for us to pick
+// up. Hardcoded (no build pipeline / Vite envs here) — these are the
+// shared lfkdsk OAuth App credentials.
+const OAUTH_CLIENT_ID = 'Ov23liCg29llKxJ7b0jv';
+const OAUTH_WORKER_URL = 'https://auth.lfkdsk.org/assets';
+const OAUTH_STATE_KEY = 'asset_tracker_oauth_state';
+
 const REAL_CURRENCIES = [
   'CNY','USD','EUR','HKD','JPY','GBP','SGD','AUD','CAD','CHF',
   'INR','KRW','BRL','MXN','SEK','NOK','DKK','NZD','ZAR','THB',
@@ -250,6 +259,78 @@ function saveConfig(cfg) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
   state.config = cfg;
 }
+
+// ─── OAuth ────────────────────────────────────────────────────────────────────
+
+// Random state for CSRF — GitHub round-trips this back via the Worker;
+// we re-check it before trusting the returned token.
+function genOAuthState() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  let s = '';
+  for (let i = 0; i < 32; i++) s += Math.floor(Math.random() * 16).toString(16);
+  return s;
+}
+
+// Full-page redirect to GitHub authorize. `repo` scope so the user can
+// pick a private repo (the recommended setup). The Worker callback URL
+// is locked-in via the OAuth App registration; we just have to point
+// our redirect_uri at it.
+function startOAuthFlow() {
+  const state = genOAuthState();
+  sessionStorage.setItem(OAUTH_STATE_KEY, state);
+  const params = new URLSearchParams({
+    client_id: OAUTH_CLIENT_ID,
+    redirect_uri: `${OAUTH_WORKER_URL}/callback`,
+    scope: 'repo',
+    state,
+  });
+  window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`;
+}
+
+// On boot, if the URL fragment looks like an OAuth callback
+// (#oauth_token=… or #oauth_error=…), validate state and return the
+// result. Always clears the fragment so a refresh doesn't replay.
+// Returns null when it's not a callback.
+function consumeOAuthCallback() {
+  const hash = window.location.hash;
+  if (!hash || hash.length < 2) return null;
+  // Hash routers use `#/...`; we only care about query-shaped fragments.
+  if (hash.startsWith('#/')) return null;
+  const params = new URLSearchParams(hash.slice(1));
+  const token = params.get('oauth_token');
+  const errorParam = params.get('oauth_error');
+  const stateParam = params.get('state');
+  if (!token && !errorParam) return null;
+
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+
+  const expected = sessionStorage.getItem(OAUTH_STATE_KEY);
+  sessionStorage.removeItem(OAUTH_STATE_KEY);
+  if (!expected || !stateParam || expected !== stateParam) {
+    return { token: null, error: 'OAuth state 校验失败，请重新登录。' };
+  }
+  if (errorParam) return { token: null, error: errorParam };
+  return { token, error: null };
+}
+
+async function fetchAuthenticatedUser(token) {
+  const res = await fetch('https://api.github.com/user', {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (!res.ok) throw new Error(`Token 验证失败 (${res.status})`);
+  return res.json();
+}
+
+// Ephemeral state for the two-phase setup screen — token + login
+// captured during phase 1, consumed when phase 2 saves the full config.
+const setupState = {
+  token: null,
+  user: null, // { login, avatar_url }
+};
 
 // ─── GitHub API ───────────────────────────────────────────────────────────────
 
@@ -1229,11 +1310,65 @@ function setupAutocomplete() {
 function showSetup() {
   document.getElementById('screen-setup').classList.remove('hidden');
   document.getElementById('screen-dashboard').classList.add('hidden');
+  showSetupAuthPhase();
 }
 
 function showDashboard() {
   document.getElementById('screen-setup').classList.add('hidden');
   document.getElementById('screen-dashboard').classList.remove('hidden');
+}
+
+// Phase 1: pick auth method (OAuth or PAT). Resets ephemeral state so
+// "back" from phase 2 lands clean.
+function showSetupAuthPhase() {
+  setupState.token = null;
+  setupState.user = null;
+  document.getElementById('setup-auth').classList.remove('hidden');
+  document.getElementById('form-setup').classList.add('hidden');
+  document.getElementById('form-setup-pat').classList.add('hidden');
+  document.getElementById('setup-auth-error').classList.add('hidden');
+  document.getElementById('setup-error').classList.add('hidden');
+  const tokenInput = document.getElementById('setup-token');
+  if (tokenInput) tokenInput.value = '';
+}
+
+// Phase 2: token captured, ask for repo + currency. user.login fills
+// the owner field (most common case — the repo lives under their own
+// account); editable so org repos still work.
+function showSetupConfigPhase(token, user) {
+  setupState.token = token;
+  setupState.user = user;
+  document.getElementById('setup-auth').classList.add('hidden');
+  document.getElementById('form-setup').classList.remove('hidden');
+  document.getElementById('setup-error').classList.add('hidden');
+
+  const banner = document.getElementById('setup-user-banner');
+  const avatar = document.getElementById('setup-user-avatar');
+  const loginEl = document.getElementById('setup-user-login');
+  if (user && user.login) {
+    if (user.avatar_url) {
+      avatar.src = user.avatar_url;
+      avatar.classList.remove('hidden');
+    } else {
+      avatar.classList.add('hidden');
+    }
+    loginEl.textContent = '@' + user.login;
+    banner.classList.remove('hidden');
+    document.getElementById('setup-owner').value = user.login;
+  } else {
+    banner.classList.add('hidden');
+  }
+  // Reasonable defaults if user hasn't touched these fields yet.
+  const repoEl = document.getElementById('setup-repo');
+  if (!repoEl.value) repoEl.value = '';
+  const branchEl = document.getElementById('setup-branch');
+  if (!branchEl.value) branchEl.value = 'main';
+}
+
+function showSetupAuthError(msg) {
+  const el = document.getElementById('setup-auth-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
 }
 
 // ─── Event Listeners ──────────────────────────────────────────────────────────
@@ -1460,11 +1595,61 @@ function bindEvents() {
     }
   });
 
-  // Setup form
+  // Phase 1: OAuth — full-page redirect; the callback comes back through
+  // init() on the next mount via consumeOAuthCallback().
+  document.getElementById('btn-oauth-signin').addEventListener('click', () => {
+    document.getElementById('setup-auth-error').classList.add('hidden');
+    try {
+      startOAuthFlow();
+    } catch (err) {
+      showSetupAuthError(err.message || 'OAuth 启动失败');
+    }
+  });
+
+  // Phase 1: PAT toggle
+  document.getElementById('btn-toggle-pat').addEventListener('click', () => {
+    const form = document.getElementById('form-setup-pat');
+    form.classList.toggle('hidden');
+    if (!form.classList.contains('hidden')) {
+      document.getElementById('setup-token').focus();
+    }
+  });
+
+  // Phase 1: PAT continue — validate token via /user, then advance to
+  // phase 2 with the user's login pre-filled as the owner.
+  document.getElementById('form-setup-pat').addEventListener('submit', async e => {
+    e.preventDefault();
+    const token = document.getElementById('setup-token').value.trim();
+    if (!token) return;
+    const errEl = document.getElementById('setup-auth-error');
+    const btnText = document.querySelector('#btn-setup-token-continue .btn-text');
+    const btnLoading = document.querySelector('#btn-setup-token-continue .btn-loading');
+    btnText.classList.add('hidden');
+    btnLoading.classList.remove('hidden');
+    errEl.classList.add('hidden');
+    try {
+      const user = await fetchAuthenticatedUser(token);
+      showSetupConfigPhase(token, { login: user.login, avatar_url: user.avatar_url });
+    } catch (err) {
+      showSetupAuthError(err.message || 'Token 无效');
+    } finally {
+      btnText.classList.remove('hidden');
+      btnLoading.classList.add('hidden');
+    }
+  });
+
+  // Phase 2: back to auth picker
+  document.getElementById('btn-setup-back').addEventListener('click', showSetupAuthPhase);
+
+  // Phase 2: save config (token captured in phase 1, lives in setupState)
   document.getElementById('form-setup').addEventListener('submit', async e => {
     e.preventDefault();
+    if (!setupState.token) {
+      showSetupAuthPhase();
+      return;
+    }
     const cfg = {
-      token: document.getElementById('setup-token').value.trim(),
+      token: setupState.token,
       owner: document.getElementById('setup-owner').value.trim(),
       repo: document.getElementById('setup-repo').value.trim(),
       branch: document.getElementById('setup-branch').value.trim() || 'main',
@@ -1592,6 +1777,19 @@ function bindEvents() {
       } catch (err) {
         showToast('汇率更新失败');
       }
+    }
+  });
+
+  // Settings: re-OAuth. Same flow as setup phase 1, but the callback
+  // path in init() detects an existing config and just rotates the
+  // token in place rather than dropping back to setup.
+  document.getElementById('btn-oauth-reconnect').addEventListener('click', () => {
+    try {
+      startOAuthFlow();
+    } catch (err) {
+      const errEl = document.getElementById('settings-error');
+      errEl.textContent = err.message || 'OAuth 启动失败';
+      errEl.classList.remove('hidden');
     }
   });
 
@@ -2148,6 +2346,52 @@ function escHtml(str) {
 
 async function init() {
   bindEvents();
+
+  // OAuth callback handling. Two arrival paths land here:
+  //   1) First-time setup — no existing config; advance to phase 2 with
+  //      the user's login pre-filled.
+  //   2) Settings → Reconnect — existing config; just swap the token
+  //      and stay on dashboard.
+  const oauthResult = consumeOAuthCallback();
+  if (oauthResult) {
+    if (oauthResult.error) {
+      showSetup();
+      showSetupAuthError(oauthResult.error);
+      return;
+    }
+    try {
+      const user = await fetchAuthenticatedUser(oauthResult.token);
+      const existing = loadConfig();
+      if (existing && existing.owner && existing.repo) {
+        saveConfig({ ...existing, token: oauthResult.token });
+        state.config = { ...existing, token: oauthResult.token };
+        showDashboard();
+        showToast('GitHub Token 已更新');
+        // Pre-populate from cache so the UI isn't blank while GitHub loads
+        const cache = loadLocalCache();
+        if (cache) {
+          state.currentItems = cache.items.map(i => ({ ...i }));
+          state.savedItems = cache.items.map(i => ({ ...i }));
+          state.snapshotIndex = cache.snapshotIndex || [];
+          state.customUnits = cache.customUnits || [];
+          populateCurrencySelects();
+          renderAll();
+        }
+        await loadData();
+        return;
+      }
+      // First-time: jump straight into phase 2 of setup.
+      document.getElementById('screen-setup').classList.remove('hidden');
+      document.getElementById('screen-dashboard').classList.add('hidden');
+      showSetupConfigPhase(oauthResult.token, { login: user.login, avatar_url: user.avatar_url });
+      return;
+    } catch (err) {
+      showSetup();
+      showSetupAuthError(err.message || 'GitHub 认证失败');
+      return;
+    }
+  }
+
   const config = loadConfig();
   if (!config || !config.token || !config.owner || !config.repo) {
     showSetup();

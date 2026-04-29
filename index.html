@@ -28,17 +28,51 @@
     <div class="setup-logo">
       <div class="setup-icon"><img src="icon.svg" alt="资产总览"></div>
       <h1>资产总览</h1>
-      <p>连接你的 GitHub 仓库以开始追踪资产</p>
+      <p id="setup-tagline">连接你的 GitHub 仓库以开始追踪资产</p>
     </div>
-    <form id="form-setup" class="setup-form">
-      <div class="form-group">
-        <label>GitHub Token</label>
-        <input type="password" id="setup-token" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off" required>
-        <span class="form-hint">需要 repo 读写权限</span>
+
+    <!-- Phase 1: Auth — OAuth as primary, PAT as fallback -->
+    <div id="setup-auth" class="setup-form">
+      <p id="setup-auth-error" class="error-text hidden"></p>
+
+      <button type="button" class="btn-oauth btn-full" id="btn-oauth-signin">
+        <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+        <span>使用 GitHub 登录</span>
+      </button>
+
+      <div class="setup-divider" aria-hidden="true"><span>或</span></div>
+
+      <button type="button" class="btn-link btn-full" id="btn-toggle-pat">使用 Personal Access Token</button>
+
+      <form id="form-setup-pat" class="setup-pat-form hidden">
+        <div class="form-group">
+          <label>GitHub Token</label>
+          <input type="password" id="setup-token" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off" required>
+          <span class="form-hint">需要 <code>repo</code> 权限。<a href="https://github.com/settings/tokens/new?scopes=repo&description=asset-tracker" target="_blank" rel="noopener">生成 Token →</a></span>
+        </div>
+        <button type="submit" class="btn-primary btn-full" id="btn-setup-token-continue">
+          <span class="btn-text">继续</span>
+          <span class="btn-loading hidden">连接中...</span>
+        </button>
+      </form>
+    </div>
+
+    <!-- Phase 2: Repo config — shown after token validated -->
+    <form id="form-setup" class="setup-form hidden">
+      <div id="setup-user-banner" class="setup-user-banner">
+        <img id="setup-user-avatar" alt="" />
+        <div class="setup-user-meta">
+          <span class="setup-user-label">已登录</span>
+          <span id="setup-user-login"></span>
+        </div>
+        <button type="button" class="btn-link-small" id="btn-setup-back">切换</button>
       </div>
       <div class="form-group">
         <label>仓库所有者</label>
         <input type="text" id="setup-owner" placeholder="username" required>
+        <span class="form-hint">默认为你的 GitHub 账户，使用组织仓库时可改</span>
       </div>
       <div class="form-group">
         <label>仓库名称</label>
@@ -225,9 +259,16 @@
       </div>
       <div class="settings-section">
         <div class="settings-section-title">GitHub 配置</div>
+        <button type="button" class="btn-oauth btn-full" id="btn-oauth-reconnect" style="margin-bottom:12px">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+          <span>用 GitHub 重新登录</span>
+        </button>
         <div class="form-group">
           <label>Token</label>
           <input type="password" id="settings-token" autocomplete="off">
+          <span class="form-hint">登录后会自动填充；也可手动粘贴 Personal Access Token</span>
         </div>
         <div class="form-group">
           <label>仓库所有者</label>

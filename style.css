@@ -1320,3 +1320,150 @@ body {
   }
 }
 
+/* ============================================
+   Setup Screen — OAuth + PAT
+   ============================================ */
+
+/* Primary CTA on the auth picker. The dark "Sign in with GitHub" pill
+   is the canonical treatment — leans on familiarity instead of the app
+   accent so users immediately understand what'll happen on click. */
+.btn-oauth {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 24px;
+  background: #1f2328;
+  color: #ffffff;
+  border: 1px solid #1f2328;
+  border-radius: var(--radius-sm);
+  font-size: 16px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  letter-spacing: 0.1px;
+}
+
+.btn-oauth:hover { background: #2d333b; }
+.btn-oauth:active { transform: scale(0.98); }
+.btn-oauth svg { flex-shrink: 0; }
+
+/* Horizontal "or" separator between OAuth and PAT */
+.setup-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 14px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.setup-divider::before,
+.setup-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--separator);
+}
+
+/* Inline-link button used for the "Use Personal Access Token" toggle
+   and other "treat me like an anchor" affordances inside forms. */
+.btn-link {
+  display: block;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 10px;
+  text-decoration: underline;
+  text-decoration-color: rgba(110, 119, 129, 0.4);
+  text-underline-offset: 3px;
+}
+
+.btn-link:hover {
+  color: var(--text-primary);
+  text-decoration-color: var(--text-primary);
+}
+
+.btn-link-small {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.btn-link-small:hover { text-decoration: underline; }
+
+.setup-pat-form {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--separator);
+}
+
+.setup-pat-form .form-hint a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.setup-pat-form .form-hint a:hover { text-decoration: underline; }
+
+.setup-pat-form .form-hint code {
+  background: var(--card-bg-2);
+  border: 1px solid var(--separator);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* "Connected as @user" banner shown above the repo config in phase 2. */
+.setup-user-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  background: var(--card-bg-2);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-sm);
+}
+
+.setup-user-banner img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.setup-user-meta {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.setup-user-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.setup-user-meta #setup-user-login {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
