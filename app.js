@@ -1817,6 +1817,33 @@ function bindEvents() {
     }
   });
 
+  // Logout — clears local config + cache + any pending OAuth state and
+  // drops back to the setup screen. Repo data is untouched (lives on
+  // GitHub); the user can re-auth and pick the same repo to recover.
+  // We don't try to revoke the GitHub token because that needs the
+  // client_secret (which only the Worker has) — the hint links users
+  // to GitHub's Applications page if they want to fully revoke.
+  document.getElementById('btn-logout').addEventListener('click', () => {
+    if (!confirm('确定退出登录？本地保存的 Token 与缓存会被清除，仓库数据不受影响。')) return;
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(CACHE_KEY);
+    sessionStorage.removeItem(OAUTH_STATE_KEY);
+    state.config = null;
+    state.exchangeRates = null;
+    state.snapshotMeta = [];
+    state.snapshotIndex = [];
+    state.snapshotData = [];
+    state.currentItems = [];
+    state.savedItems = [];
+    state.viewingSnapshot = null;
+    state.customUnits = [];
+    state.customUnitsSha = null;
+    state.isDirty = false;
+    closeSettings();
+    showSetup();
+    showToast('已退出登录');
+  });
+
   // FX tooltip toggle
   document.getElementById('total-date').addEventListener('click', () => {
     const tip = document.getElementById('fx-tooltip');
