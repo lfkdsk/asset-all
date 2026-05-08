@@ -17,6 +17,24 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
 
+  <!-- Apply persisted theme before stylesheet evaluates so the page
+       paints with the right vars on first frame (no flash). -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('asset-tracker-theme');
+        if (t && t !== 'default') document.documentElement.setAttribute('data-theme', t);
+      } catch (_) {}
+    })();
+  </script>
+
+  <!-- Editorial typography (Fraunces serif + JetBrains Mono) is only
+       used by the InkType theme; loaded with display=swap so the
+       default theme never blocks on it. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
@@ -221,6 +239,14 @@
       </button>
     </div>
     <div class="panel-body">
+      <div class="settings-section">
+        <div class="settings-section-title">外观主题</div>
+        <select id="settings-theme" class="settings-select">
+          <option value="default">Carbon — 默认深色</option>
+          <option value="ink">InkType — 暖色编辑风</option>
+        </select>
+        <p class="settings-hint" style="margin-top:4px">主题保存在本地，不会同步到仓库。</p>
+      </div>
       <div class="settings-section">
         <div class="settings-section-title">本位币</div>
         <select id="settings-currency" class="settings-select">

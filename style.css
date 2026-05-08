@@ -11,6 +11,11 @@
 :root {
   --accent: #0A84FF;
   --accent-dark: #0062CC;
+  --accent-soft: rgba(10,132,255,0.15);
+  --accent-soft-strong: rgba(10,132,255,0.25);
+  --accent-glow: 0 4px 20px rgba(10,132,255,0.45);
+  --danger-soft: rgba(255,69,58,0.12);
+  --positive-soft: rgba(52,199,89,0.15);
   --bg: #000000;
   --bg-elevated: #1C1C1E;
   --card-bg: #1C1C1E;
@@ -22,6 +27,8 @@
   --danger: #FF453A;
   --success: #30D158;
   --warning: #FFD60A;
+  --positive: #30D158;
+  --negative: #FF453A;
 
   /* Category colors */
   --cat-cash: #30D158;
@@ -34,14 +41,155 @@
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 20px;
+  --radius-pill: 999px;
   --shadow: 0 2px 16px rgba(0,0,0,0.5);
   --shadow-lg: 0 8px 40px rgba(0,0,0,0.6);
   --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='rgba(235,235,245,0.5)' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+
+  /* Typography stacks */
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Noto Sans SC", "Segoe UI", sans-serif;
+  --font-display: var(--font-body);
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-feature-numeric: "tnum" 1;
+
+  /* Total card surfaces (theme-overridable) */
+  --total-bg: linear-gradient(135deg, #0A2540 0%, #0D1B2A 50%, #001A33 100%);
+  --total-glow: radial-gradient(circle, rgba(10,132,255,0.15) 0%, transparent 70%);
+  --total-border: rgba(10,132,255,0.2);
+  --total-amount-fg: linear-gradient(135deg, #FFFFFF 0%, rgba(235,235,245,0.85) 100%);
+  --total-meta-text: rgba(235,235,245,0.6);
+  --total-meta-faint: rgba(235,235,245,0.4);
+  --currency-badge-bg: rgba(10,132,255,0.3);
+  --currency-badge-border: rgba(10,132,255,0.4);
+  --currency-badge-text: #5AC8FA;
+
+  /* ── Shareable-screenshot tokens ──
+     Canvas2D can't parse `linear-gradient(...)` or compute selectors,
+     so the screenshot renderer reads these flat values directly via
+     getComputedStyle. Mirrors the on-screen palette so the exported
+     PNG matches whichever theme is active. */
+  --shot-bg: #000000;
+  --shot-card-bg: #1C1C1E;
+  --shot-grad-1: #0A2540;
+  --shot-grad-2: #0D1B2A;
+  --shot-grad-3: #001A33;
+  --shot-border: rgba(10,132,255,0.2);
+  --shot-text-primary: #FFFFFF;
+  --shot-text-secondary: rgba(235,235,245,0.6);
+  --shot-text-bright: rgba(235,235,245,0.85);
+  --shot-text-faint: rgba(235,235,245,0.25);
+  --shot-row-sep: rgba(255,255,255,0.06);
+  --shot-badge-bg: rgba(10,132,255,0.3);
+  --shot-badge-border: rgba(10,132,255,0.4);
+  --shot-badge-text: #5AC8FA;
+  --shot-positive: #30D158;
+  --shot-negative: #FF453A;
+  --shot-cat-cash: #30D158;
+  --shot-cat-stock: #0A84FF;
+  --shot-cat-fund: #FF9F0A;
+  --shot-cat-bond: #BF5AF2;
+  --shot-cat-property: #5AC8FA;
+  --shot-cat-other: #636366;
+  --shot-radius: 16;
+  --shot-badge-radius: 10;
+  --shot-font-base: -apple-system, "SF Pro Display", "Helvetica Neue", "Noto Sans SC", sans-serif;
+  --shot-font-display: -apple-system, "SF Pro Display", "Helvetica Neue", "Noto Sans SC", sans-serif;
+  --shot-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   InkType — warm-paper editorial theme.
+   Inspired by https://inktype.lfkdsk.org: warm dark surfaces,
+   ink cream text, a single rust accent, square corners,
+   hairline borders instead of shadows, serif/mono pairing.
+   ────────────────────────────────────────────────────────────── */
+[data-theme="ink"] {
+  --accent: #D97757;
+  --accent-dark: #B85F40;
+  --accent-soft: rgba(217,119,87,0.14);
+  --accent-soft-strong: rgba(217,119,87,0.24);
+  --accent-glow: 0 0 0 1px rgba(217,119,87,0.35);
+  --danger-soft: rgba(200,85,61,0.16);
+  --positive-soft: rgba(139,166,104,0.18);
+
+  --bg: #1A1614;
+  --bg-elevated: #211C19;
+  --card-bg: #211C19;
+  --card-bg-2: #2A241F;
+  --text-primary: #EDE4D3;
+  --text-secondary: rgba(237,228,211,0.66);
+  --text-tertiary: rgba(237,228,211,0.42);
+  --separator: #3D362F;
+
+  --danger: #C8553D;
+  --success: #8BA668;
+  --warning: #D4A04A;
+  --positive: #8BA668;
+  --negative: #C8553D;
+
+  --cat-cash: #8BA668;
+  --cat-stock: #6B8CA3;
+  --cat-fund: #D4A04A;
+  --cat-bond: #B788C9;
+  --cat-property: #82A5BD;
+  --cat-other: #5A5147;
+
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+  --radius-pill: 2px;
+  --shadow: 0 0 0 1px rgba(237,228,211,0.04);
+  --shadow-lg: 0 0 0 1px rgba(237,228,211,0.08), 0 12px 32px rgba(0,0,0,0.5);
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23B3A896' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Noto Sans SC", "Segoe UI", sans-serif;
+  --font-display: 'Fraunces', 'Source Han Serif SC', 'Songti SC', 'STSong', Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --total-bg: linear-gradient(135deg, #2A241F 0%, #211C19 55%, #1A1614 100%);
+  --total-glow: radial-gradient(circle, rgba(217,119,87,0.18) 0%, transparent 70%);
+  --total-border: rgba(217,119,87,0.22);
+  --total-amount-fg: linear-gradient(135deg, #EDE4D3 0%, rgba(237,228,211,0.72) 100%);
+  --total-meta-text: rgba(237,228,211,0.66);
+  --total-meta-faint: rgba(237,228,211,0.42);
+  --currency-badge-bg: rgba(217,119,87,0.18);
+  --currency-badge-border: rgba(217,119,87,0.4);
+  --currency-badge-text: #E8A989;
+
+  --shot-bg: #1A1614;
+  --shot-card-bg: #211C19;
+  --shot-grad-1: #2A241F;
+  --shot-grad-2: #211C19;
+  --shot-grad-3: #1A1614;
+  --shot-border: #3D362F;
+  --shot-text-primary: #EDE4D3;
+  --shot-text-secondary: rgba(237,228,211,0.66);
+  --shot-text-bright: rgba(237,228,211,0.9);
+  --shot-text-faint: rgba(237,228,211,0.4);
+  --shot-row-sep: rgba(237,228,211,0.06);
+  --shot-badge-bg: rgba(217,119,87,0.18);
+  --shot-badge-border: rgba(217,119,87,0.4);
+  --shot-badge-text: #E8A989;
+  --shot-positive: #8BA668;
+  --shot-negative: #C8553D;
+  --shot-cat-cash: #8BA668;
+  --shot-cat-stock: #6B8CA3;
+  --shot-cat-fund: #D4A04A;
+  --shot-cat-bond: #B788C9;
+  --shot-cat-property: #82A5BD;
+  --shot-cat-other: #5A5147;
+  --shot-radius: 2;
+  --shot-badge-radius: 2;
+  --shot-font-base: 'Inter', -apple-system, "Helvetica Neue", "Noto Sans SC", sans-serif;
+  --shot-font-display: 'Fraunces', 'Source Han Serif SC', 'Songti SC', Georgia, serif;
+  --shot-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  color-scheme: dark;
 }
 
 html, body {
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Noto Sans SC", "Segoe UI", sans-serif;
+  font-family: var(--font-body);
   background: var(--bg);
   color: var(--text-primary);
   font-size: 16px;
@@ -228,16 +376,16 @@ body {
   transition: background 0.2s;
 }
 
-.btn-danger:hover { background: rgba(255,69,58,0.1); }
+.btn-danger:hover { background: var(--danger-soft); }
 
 .btn-add {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(10,132,255,0.15);
+  background: var(--accent-soft);
   color: var(--accent);
   border: none;
-  border-radius: 20px;
+  border-radius: var(--radius-pill);
   padding: 6px 14px;
   font-size: 14px;
   font-weight: 600;
@@ -245,7 +393,7 @@ body {
   transition: background 0.2s;
 }
 
-.btn-add:hover { background: rgba(10,132,255,0.25); }
+.btn-add:hover { background: var(--accent-soft-strong); }
 
 .icon-btn {
   background: none;
@@ -260,7 +408,7 @@ body {
   transition: background 0.2s;
 }
 
-.icon-btn:hover { background: rgba(10,132,255,0.15); }
+.icon-btn:hover { background: var(--accent-soft); }
 
 /* ============================================
    App Header
@@ -290,10 +438,10 @@ body {
 .total-card {
   margin: 0 16px 16px;
   padding: 28px 24px;
-  background: linear-gradient(135deg, #0A2540 0%, #0D1B2A 50%, #001A33 100%);
+  background: var(--total-bg);
   border-radius: var(--radius-lg);
-  color: white;
-  border: 1px solid rgba(10,132,255,0.2);
+  color: var(--text-primary);
+  border: 1px solid var(--total-border);
   box-shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
   position: relative;
   overflow: hidden;
@@ -306,7 +454,7 @@ body {
   right: -40px;
   width: 200px;
   height: 200px;
-  background: radial-gradient(circle, rgba(10,132,255,0.15) 0%, transparent 70%);
+  background: var(--total-glow);
   pointer-events: none;
 }
 
@@ -338,7 +486,7 @@ body {
 .total-label {
   font-size: 14px;
   font-weight: 500;
-  color: rgba(235,235,245,0.6);
+  color: var(--total-meta-text);
   margin-bottom: 8px;
   display: flex;
   align-items: center;
@@ -374,7 +522,7 @@ body {
   line-height: 1;
   margin-bottom: 12px;
   font-variant-numeric: tabular-nums;
-  background: linear-gradient(135deg, #FFFFFF 0%, rgba(235,235,245,0.85) 100%);
+  background: var(--total-amount-fg);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -383,7 +531,7 @@ body {
 .total-usd {
   font-size: 16px;
   font-weight: 500;
-  color: rgba(235,235,245,0.4);
+  color: var(--total-meta-faint);
   margin-bottom: 12px;
 }
 
@@ -394,13 +542,13 @@ body {
 }
 
 .currency-badge {
-  background: rgba(10,132,255,0.3);
-  border: 1px solid rgba(10,132,255,0.4);
+  background: var(--currency-badge-bg);
+  border: 1px solid var(--currency-badge-border);
   padding: 3px 10px;
-  border-radius: 20px;
+  border-radius: var(--radius-pill);
   font-size: 13px;
   font-weight: 600;
-  color: #5AC8FA;
+  color: var(--currency-badge-text);
 }
 
 .total-change {
@@ -408,8 +556,8 @@ body {
   font-weight: 600;
 }
 
-.total-change.positive { color: #30D158; }
-.total-change.negative { color: #FF453A; }
+.total-change.positive { color: var(--positive); }
+.total-change.negative { color: var(--negative); }
 
 .total-date-wrapper {
   position: relative;
@@ -418,12 +566,12 @@ body {
 
 .total-date {
   font-size: 12px;
-  color: rgba(235,235,245,0.4);
+  color: var(--total-meta-faint);
   cursor: pointer;
 }
 
 .total-date:hover {
-  color: rgba(235,235,245,0.6);
+  color: var(--total-meta-text);
 }
 
 .fx-tooltip {
@@ -478,8 +626,8 @@ body {
   font-size: 13px;
   font-weight: 500;
 }
-.chart-period-change.positive { color: #34C759; }
-.chart-period-change.negative { color: #FF453A; }
+.chart-period-change.positive { color: var(--positive); }
+.chart-period-change.negative { color: var(--negative); }
 
 .chart-wrapper {
   padding: 12px 16px 8px;
@@ -501,21 +649,21 @@ body {
 .range-btn {
   background: none;
   border: none;
-  color: rgba(235,235,245,0.45);
+  color: var(--text-tertiary);
   font-size: 12px;
   font-weight: 600;
   padding: 5px 12px;
-  border-radius: 20px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   letter-spacing: 0.3px;
 }
 .range-btn:hover {
-  color: rgba(235,235,245,0.75);
+  color: var(--text-secondary);
 }
 .range-btn.active {
-  background: rgba(52,199,89,0.15);
-  color: #34C759;
+  background: var(--positive-soft);
+  color: var(--positive);
 }
 
 /* ============================================
@@ -690,7 +838,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  box-shadow: 0 4px 20px rgba(10,132,255,0.45);
+  box-shadow: var(--accent-glow);
 }
 
 .btn-save:hover { background: var(--accent-dark); }
@@ -826,8 +974,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(10,132,255,0.1);
-  border: 1px solid rgba(10,132,255,0.25);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft-strong);
   border-radius: 10px;
   padding: 8px 12px;
   margin-bottom: 8px;
@@ -859,7 +1007,7 @@ body {
 }
 
 .btn-accent {
-  background: rgba(10,132,255,0.15);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -904,7 +1052,7 @@ body {
   height: 32px;
   border-radius: 50%;
   border: none;
-  background: rgba(255,69,58,0.15);
+  background: var(--danger-soft);
   color: var(--danger);
   font-size: 18px;
   cursor: pointer;
@@ -961,7 +1109,7 @@ body {
   padding: 4px 10px;
   border-radius: 8px;
   border: none;
-  background: rgba(255,69,58,0.12);
+  background: var(--danger-soft);
   color: var(--danger);
   font-size: 13px;
   font-weight: 600;
@@ -1032,7 +1180,7 @@ body {
   padding: 4px 10px;
   border-radius: 8px;
   border: none;
-  background: rgba(10,132,255,0.15);
+  background: var(--accent-soft);
   color: var(--accent);
   font-size: 13px;
   font-weight: 600;
@@ -1155,7 +1303,7 @@ body {
 
 .autocomplete-item:last-child { border-bottom: none; }
 .autocomplete-item:hover,
-.autocomplete-item.active { background: rgba(10,132,255,0.15); }
+.autocomplete-item.active { background: var(--accent-soft); }
 
 /* ============================================
    Toast
@@ -1166,11 +1314,11 @@ body {
   bottom: 100px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(44,44,46,0.95);
-  border: 1px solid rgba(255,255,255,0.1);
-  color: white;
+  background: var(--card-bg-2);
+  border: 1px solid var(--separator);
+  color: var(--text-primary);
   padding: 12px 24px;
-  border-radius: 24px;
+  border-radius: var(--radius-pill);
   font-size: 15px;
   font-weight: 500;
   z-index: 999;
@@ -1466,4 +1614,141 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ============================================
+   InkType theme — typography, square corners,
+   ornaments. Overrides land at the end of the
+   stylesheet so the unstyled "Carbon" defaults
+   still work when [data-theme] is absent.
+   ============================================ */
+
+/* Typography — serif headlines, mono numerals.
+   We keep `body` on Inter so only callsites that
+   semantically deserve serif/mono get reassigned. */
+[data-theme="ink"] .app-title,
+[data-theme="ink"] .setup-logo h1,
+[data-theme="ink"] .panel-header h2,
+[data-theme="ink"] .modal-header h2,
+[data-theme="ink"] .total-amount,
+[data-theme="ink"] .card-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+[data-theme="ink"] .total-amount {
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+  letter-spacing: -0.5px;
+}
+
+[data-theme="ink"] .total-usd,
+[data-theme="ink"] .total-date,
+[data-theme="ink"] .total-change,
+[data-theme="ink"] .currency-badge,
+[data-theme="ink"] .asset-value-base,
+[data-theme="ink"] .asset-value-orig,
+[data-theme="ink"] .category-pct,
+[data-theme="ink"] .chart-period-change,
+[data-theme="ink"] .range-btn,
+[data-theme="ink"] .history-total,
+[data-theme="ink"] .snapshot-manage-total,
+[data-theme="ink"] .custom-unit-price,
+[data-theme="ink"] .fx-rate-date {
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum' 1;
+}
+
+[data-theme="ink"] .form-group label,
+[data-theme="ink"] .settings-section-title,
+[data-theme="ink"] .setup-divider,
+[data-theme="ink"] .setup-user-label {
+  letter-spacing: 1px;
+  font-weight: 500;
+}
+
+/* Squared-off corners for elements with hardcoded radii.
+   The radius vars handle the rest, but a handful of
+   components hardcode their own — flatten them here. */
+[data-theme="ink"] .icon-btn,
+[data-theme="ink"] .btn-secondary,
+[data-theme="ink"] .btn-trash,
+[data-theme="ink"] .btn-edit-unit,
+[data-theme="ink"] .btn-small,
+[data-theme="ink"] .asset-icon,
+[data-theme="ink"] .asset-logo,
+[data-theme="ink"] .history-item-row,
+[data-theme="ink"] .history-item-row input,
+[data-theme="ink"] .history-item-row select,
+[data-theme="ink"] .snapshot-manage-row,
+[data-theme="ink"] .custom-unit-row,
+[data-theme="ink"] .fx-tooltip,
+[data-theme="ink"] .snapshot-view-banner,
+[data-theme="ink"] .setup-pat-form .form-hint code,
+[data-theme="ink"] .screenshot-btn,
+[data-theme="ink"] .mask-toggle {
+  border-radius: 2px;
+}
+
+[data-theme="ink"] .btn-remove-row,
+[data-theme="ink"] .setup-user-banner img {
+  border-radius: 2px;
+}
+
+[data-theme="ink"] .category-dot {
+  border-radius: 1px;
+  width: 8px;
+  height: 8px;
+}
+
+/* Total card — paper-like rather than glassy.
+   Drop the inset highlight, keep just a hairline. */
+[data-theme="ink"] .total-card {
+  box-shadow: none;
+  border: 1px solid var(--separator);
+}
+
+[data-theme="ink"] .currency-badge {
+  border-radius: 2px;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+/* Range-buttons read as small caps in editorial layouts. */
+[data-theme="ink"] .range-btn {
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+/* OAuth pill — stay legible against the warm bg.
+   Keep it darker than the surface but not pure black. */
+[data-theme="ink"] .btn-oauth {
+  background: #1A1614;
+  border-color: var(--separator);
+}
+[data-theme="ink"] .btn-oauth:hover {
+  background: #0F0C0A;
+}
+
+/* Save button gets a hairline outline instead of the
+   neon blue glow — matches the "no heavy shadows" rule. */
+[data-theme="ink"] .btn-save {
+  box-shadow: var(--accent-glow);
+}
+
+/* Card hairlines — replace the white-tinted 4% border
+   the default theme uses, since white doesn't read on
+   warm cream. */
+[data-theme="ink"] .card,
+[data-theme="ink"] .panel-sheet,
+[data-theme="ink"] .modal-sheet,
+[data-theme="ink"] .settings-section {
+  border-color: var(--separator);
+}
+
+[data-theme="ink"] .asset-item:hover { background: rgba(237,228,211,0.04); }
+[data-theme="ink"] .asset-item:active { background: rgba(237,228,211,0.07); }
+
+[data-theme="ink"] ::-webkit-scrollbar-thumb {
+  background: rgba(237,228,211,0.18);
 }
