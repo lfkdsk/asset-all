@@ -8,6 +8,34 @@
 
 const STORAGE_KEY = 'asset_tracker_config';
 
+// Theme is a per-device preference, not part of the GitHub config —
+// kept in its own key so it survives logout/reauth and is applied
+// before any JS runs (see the inline boot script in index.html).
+const THEME_KEY = 'asset-tracker-theme';
+const THEMES = ['default', 'ink'];
+
+function loadTheme() {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return THEMES.includes(t) ? t : 'default';
+  } catch { return 'default'; }
+}
+
+function applyTheme(theme) {
+  if (!THEMES.includes(theme)) theme = 'default';
+  if (theme === 'default') {
+    document.documentElement.removeAttribute('data-theme');
+  } else {
+    document.documentElement.setAttribute('data-theme', theme);
+  }
+  try { localStorage.setItem(THEME_KEY, theme); } catch {}
+  // Re-render so chart.js inline colors pick up the new palette
+  // (it reads them at construction, not from CSS vars at runtime).
+  if (typeof state !== 'undefined' && state.trendChart) {
+    renderAll();
+  }
+}
+
 // GitHub OAuth — public values; the secret lives in the lfkdsk-auth
 // Worker. Frontend kicks off authorize, the Worker exchanges the code,
 // and bounces back to assets.lfkdsk.org/#oauth_token=… for us to pick
@@ -911,10 +939,17 @@ function renderTrendChart() {
     periodChangeEl.classList.add('hidden');
   }
 
-  // Color based on trend
+  // Color based on trend — read from CSS so both themes work.
+  const cssVar = name => getComputedStyle(document.documentElement)
+    .getPropertyValue(name).trim();
   const isPositive = values.length < 2 || values[values.length - 1] >= values[0];
-  const lineColor = isPositive ? '#34C759' : '#FF453A';
-  const gradientTop = isPositive ? 'rgba(52,199,89,0.25)' : 'rgba(255,69,58,0.25)';
+  const lineColor = cssVar(isPositive ? '--positive' : '--negative') || (isPositive ? '#34C759' : '#FF453A');
+  const gradientTop = isPositive
+    ? (cssVar('--positive-soft') || 'rgba(52,199,89,0.25)')
+    : (cssVar('--danger-soft') || 'rgba(255,69,58,0.25)');
+  const cardBg = cssVar('--card-bg') || '#1C1C1E';
+  const tickColor = cssVar('--text-tertiary') || 'rgba(235,235,245,0.4)';
+  const gridColor = cssVar('--separator') || 'rgba(255,255,255,0.04)';
 
   const canvas = document.getElementById('trend-chart');
   const ctx = canvas.getContext('2d');
@@ -946,7 +981,7 @@ function renderTrendChart() {
         pointBorderColor: 'transparent',
         pointHoverRadius: 6,
         pointHoverBackgroundColor: lineColor,
-        pointHoverBorderColor: '#1C1C1E',
+        pointHoverBorderColor: cardBg,
         pointHoverBorderWidth: 2,
       }],
     },
@@ -967,11 +1002,11 @@ function renderTrendChart() {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: 'rgba(44,44,46,0.95)',
-          borderColor: 'rgba(255,255,255,0.1)',
+          backgroundColor: cssVar('--card-bg-2') || 'rgba(44,44,46,0.95)',
+          borderColor: gridColor,
           borderWidth: 1,
-          titleColor: 'rgba(235,235,245,0.6)',
-          bodyColor: '#FFFFFF',
+          titleColor: cssVar('--text-secondary') || 'rgba(235,235,245,0.6)',
+          bodyColor: cssVar('--text-primary') || '#FFFFFF',
           padding: 10,
           callbacks: {
             label: c => formatAmount(c.raw, base),
@@ -981,14 +1016,14 @@ function renderTrendChart() {
       scales: {
         x: {
           grid: { display: false },
-          ticks: { color: 'rgba(235,235,245,0.4)', font: { size: 11 }, maxTicksLimit: 6 },
+          ticks: { color: tickColor, font: { size: 11 }, maxTicksLimit: 6 },
           border: { display: false },
         },
         y: {
           position: 'right',
-          grid: { color: 'rgba(255,255,255,0.04)' },
+          grid: { color: gridColor },
           ticks: {
-            color: 'rgba(235,235,245,0.4)',
+            color: tickColor,
             font: { size: 11 },
             callback: v => formatAmountCompact(v, base),
           },
@@ -1251,6 +1286,7 @@ function openSettings() {
   document.getElementById('settings-repo').value = cfg.repo || '';
   document.getElementById('settings-branch').value = cfg.branch || 'main';
   document.getElementById('settings-currency').value = cfg.baseCurrency || 'CNY';
+  document.getElementById('settings-theme').value = loadTheme();
   document.getElementById('settings-error').classList.add('hidden');
   document.getElementById('panel-settings').classList.remove('hidden');
 
@@ -1383,8 +1419,9 @@ function bindEvents() {
   // Mask toggle
   document.getElementById('btn-toggle-mask').addEventListener('click', toggleMask);
 
-  // Screenshot — pure canvas drawing
-  document.getElementById('btn-screenshot').addEventListener('click', () => {
+  // Screenshot — pure canvas drawing. Reads --shot-* CSS tokens so the
+  // exported PNG follows the active theme (Carbon vs InkType).
+  document.getElementById('btn-screenshot').addEventListener('click', async () => {
     const btn = document.getElementById('btn-screenshot');
     btn.disabled = true;
     btn.style.opacity = '0.3';
@@ -1410,6 +1447,43 @@ function bindEvents() {
       });
       const total = rows.reduce((s, r) => s + r.valueInBase, 0);
 
+      // Read theme tokens. Canvas2D can't resolve `linear-gradient(...)`
+      // or selectors, so each glyph/fill/stroke pulls a flat value
+      // from the document root.
+      const cs = getComputedStyle(document.documentElement);
+      const v = name => cs.getPropertyValue(name).trim();
+      const num = (name, fallback) => {
+        const n = parseFloat(v(name));
+        return Number.isFinite(n) ? n : fallback;
+      };
+      const T = {
+        bg: v('--shot-bg') || '#000',
+        cardBg: v('--shot-card-bg') || '#1C1C1E',
+        grad1: v('--shot-grad-1'), grad2: v('--shot-grad-2'), grad3: v('--shot-grad-3'),
+        border: v('--shot-border'),
+        textPrimary: v('--shot-text-primary') || '#FFF',
+        textSecondary: v('--shot-text-secondary'),
+        textBright: v('--shot-text-bright'),
+        textFaint: v('--shot-text-faint'),
+        rowSep: v('--shot-row-sep'),
+        badgeBg: v('--shot-badge-bg'),
+        badgeBorder: v('--shot-badge-border'),
+        badgeText: v('--shot-badge-text'),
+        positive: v('--shot-positive') || '#30D158',
+        negative: v('--shot-negative') || '#FF453A',
+        catCash: v('--shot-cat-cash'),
+        catStock: v('--shot-cat-stock'),
+        catFund: v('--shot-cat-fund'),
+        catBond: v('--shot-cat-bond'),
+        catProperty: v('--shot-cat-property'),
+        catOther: v('--shot-cat-other'),
+        radius: num('--shot-radius', 16),
+        badgeRadius: num('--shot-badge-radius', 10),
+        fontBase: v('--shot-font-base') || '-apple-system, sans-serif',
+        fontDisplay: v('--shot-font-display') || '-apple-system, sans-serif',
+        fontMono: v('--shot-font-mono') || 'monospace',
+      };
+
       // Canvas setup (2x for retina)
       const S = 2;
       const W = 420 * S;
@@ -1417,7 +1491,8 @@ function bindEvents() {
       const cardPad = 24 * S;
       const rowH = 52 * S;
       const cardGap = 16 * S;
-      const radius = 16 * S;
+      const radius = T.radius * S;
+      const badgeRadius = T.badgeRadius * S;
 
       // Measure total height
       const topCardH = 140 * S;
@@ -1430,19 +1505,35 @@ function bindEvents() {
       canvas.height = totalH;
       const ctx = canvas.getContext('2d');
 
+      // Webfonts (Fraunces / Inter / JetBrains Mono) load lazily on the
+      // page, but the canvas paint is synchronous — without explicit
+      // priming it falls back to serif/sans-serif and the PNG looks
+      // wrong on first export. Trigger loads, then await fonts.ready.
+      const primeSizes = [40, 16, 15, 14, 13, 12, 11];
+      const families = [T.fontDisplay, T.fontBase, T.fontMono];
+      try {
+        await Promise.all(families.flatMap(f =>
+          primeSizes.map(s => document.fonts.load(`600 ${s * S}px ${f}`))));
+        await document.fonts.ready;
+      } catch (_) { /* best-effort; fall through to whatever is loaded */ }
+
       // Helpers
       const roundRect = (x, y, w, h, r) => {
+        const rr = Math.min(r, w / 2, h / 2);
         ctx.beginPath();
-        ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-        ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-        ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-        ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.moveTo(x + rr, y); ctx.lineTo(x + w - rr, y); ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+        ctx.lineTo(x + w, y + h - rr); ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+        ctx.lineTo(x + rr, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+        ctx.lineTo(x, y + rr); ctx.quadraticCurveTo(x, y, x + rr, y);
         ctx.closePath();
       };
-      const CAT_HEX = { '现金': '#30D158', '股票': '#0A84FF', '基金': '#FF9F0A', '债券': '#BF5AF2', '房产': '#5AC8FA', '其他': '#636366' };
+      const CAT_HEX = {
+        '现金': T.catCash, '股票': T.catStock, '基金': T.catFund,
+        '债券': T.catBond, '房产': T.catProperty, '其他': T.catOther,
+      };
 
       // Background
-      ctx.fillStyle = '#000000';
+      ctx.fillStyle = T.bg;
       ctx.fillRect(0, 0, W, totalH);
 
       // ─── Total Card ────────────────────────────────
@@ -1450,13 +1541,13 @@ function bindEvents() {
       roundRect(pad, y, W - pad * 2, topCardH, radius);
       // Gradient background
       const grad = ctx.createLinearGradient(pad, y, W - pad, y + topCardH);
-      grad.addColorStop(0, '#0A2540');
-      grad.addColorStop(0.5, '#0D1B2A');
-      grad.addColorStop(1, '#001A33');
+      grad.addColorStop(0, T.grad1);
+      grad.addColorStop(0.5, T.grad2);
+      grad.addColorStop(1, T.grad3);
       ctx.fillStyle = grad;
       ctx.fill();
       // Border
-      ctx.strokeStyle = 'rgba(10,132,255,0.2)';
+      ctx.strokeStyle = T.border;
       ctx.lineWidth = 1 * S;
       ctx.stroke();
 
@@ -1464,15 +1555,15 @@ function bindEvents() {
       let ty = y + 30 * S;
 
       // "总资产" label
-      ctx.fillStyle = 'rgba(235,235,245,0.6)';
-      ctx.font = `500 ${14 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+      ctx.fillStyle = T.textSecondary;
+      ctx.font = `500 ${14 * S}px ${T.fontBase}`;
       ctx.textBaseline = 'top';
       ctx.fillText('总资产', tx, ty);
       ty += 26 * S;
 
-      // Total amount
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = `700 ${40 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+      // Total amount — display font (serif under Ink)
+      ctx.fillStyle = T.textPrimary;
+      ctx.font = `700 ${40 * S}px ${T.fontDisplay}`;
       const totalText = state.masked ? '****' : formatAmountCompact(total, base);
       ctx.fillText(totalText, tx, ty);
       ty += 48 * S;
@@ -1480,16 +1571,16 @@ function bindEvents() {
       // USD + change line
       let metaX = tx;
       // Currency badge
-      ctx.font = `600 ${12 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+      ctx.font = `600 ${12 * S}px ${T.fontMono}`;
       const badgeText = base;
       const badgeW = ctx.measureText(badgeText).width + 16 * S;
-      roundRect(metaX, ty, badgeW, 22 * S, 10 * S);
-      ctx.fillStyle = 'rgba(10,132,255,0.3)';
+      roundRect(metaX, ty, badgeW, 22 * S, badgeRadius);
+      ctx.fillStyle = T.badgeBg;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(10,132,255,0.4)';
+      ctx.strokeStyle = T.badgeBorder;
       ctx.lineWidth = 1 * S;
       ctx.stroke();
-      ctx.fillStyle = '#5AC8FA';
+      ctx.fillStyle = T.badgeText;
       ctx.fillText(badgeText, metaX + 8 * S, ty + 5 * S);
       metaX += badgeW + 10 * S;
 
@@ -1504,8 +1595,8 @@ function bindEvents() {
         const diff = total - prevTotal;
         const pct = prevTotal > 0 ? ((diff / prevTotal) * 100).toFixed(2) : 0;
         const sign = diff >= 0 ? '+' : '';
-        ctx.fillStyle = diff >= 0 ? '#30D158' : '#FF453A';
-        ctx.font = `600 ${13 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+        ctx.fillStyle = diff >= 0 ? T.positive : T.negative;
+        ctx.font = `600 ${13 * S}px ${T.fontMono}`;
         const changeText = state.masked ? '****' : `${sign}${formatAmountCompact(diff, base)} (${sign}${pct}%)`;
         ctx.fillText(changeText, metaX, ty + 4 * S);
       }
@@ -1513,12 +1604,12 @@ function bindEvents() {
       // ─── Asset List Card ───────────────────────────
       y = pad + topCardH + cardGap;
       roundRect(pad, y, W - pad * 2, listH, radius);
-      ctx.fillStyle = '#1C1C1E';
+      ctx.fillStyle = T.cardBg;
       ctx.fill();
 
       // "资产明细" header
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = `600 ${16 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+      ctx.fillStyle = T.textPrimary;
+      ctx.font = `600 ${16 * S}px ${T.fontDisplay}`;
       ctx.fillText('资产明细', pad + cardPad, y + 16 * S);
 
       // Rows
@@ -1529,7 +1620,7 @@ function bindEvents() {
 
         // Separator
         if (i > 0) {
-          ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+          ctx.strokeStyle = T.rowSep;
           ctx.lineWidth = 1 * S;
           ctx.beginPath();
           ctx.moveTo(rx, ry);
@@ -1539,20 +1630,20 @@ function bindEvents() {
 
         // Category dot
         const dotR = 5 * S;
-        ctx.fillStyle = CAT_HEX[row.category] || CAT_HEX['其他'];
+        ctx.fillStyle = CAT_HEX[row.category] || T.catOther;
         ctx.beginPath();
         ctx.arc(rx + dotR, ry + rowH / 2, dotR, 0, Math.PI * 2);
         ctx.fill();
 
         // Name
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = `500 ${15 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+        ctx.fillStyle = T.textPrimary;
+        ctx.font = `500 ${15 * S}px ${T.fontBase}`;
         ctx.textBaseline = 'middle';
         ctx.fillText(row.name, rx + dotR * 2 + 12 * S, ry + rowH / 2);
 
-        // Amount (right aligned)
-        ctx.fillStyle = 'rgba(235,235,245,0.85)';
-        ctx.font = `600 ${15 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+        // Amount (right aligned, mono)
+        ctx.fillStyle = T.textBright;
+        ctx.font = `600 ${15 * S}px ${T.fontMono}`;
         const amtText = state.masked ? '****' : formatAmount(row.valueInBase, base);
         const amtW = ctx.measureText(amtText).width;
         ctx.fillText(amtText, rx + rw - amtW, ry + rowH / 2);
@@ -1564,8 +1655,8 @@ function bindEvents() {
 
       // ─── Footer ────────────────────────────────────
       y = pad + topCardH + cardGap + listH + cardGap;
-      ctx.fillStyle = 'rgba(235,235,245,0.25)';
-      ctx.font = `400 ${11 * S}px -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif`;
+      ctx.fillStyle = T.textFaint;
+      ctx.font = `400 ${11 * S}px ${T.fontBase}`;
       ctx.textAlign = 'center';
       const dateText = isHistorical ? viewingSnapshot.date : today();
       ctx.fillText(`资产总览 · ${dateText}`, W / 2, y);
@@ -1763,6 +1854,12 @@ function bindEvents() {
     } catch (err) {
       statusEl.textContent = `更新失败：${err.message}`;
     }
+  });
+
+  // Theme — instant apply, persisted to localStorage independently
+  // of the GitHub config (so it survives logout / reauth).
+  document.getElementById('settings-theme').addEventListener('change', e => {
+    applyTheme(e.target.value);
   });
 
   // Settings currency change (live update)

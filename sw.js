@@ -1,6 +1,6 @@
 /* Service Worker — Asset Tracker PWA */
 
-const CACHE = 'asset-tracker-v2';
+const CACHE = 'asset-tracker-v3';
 const APP_SHELL = [
   './',
   './index.html',
