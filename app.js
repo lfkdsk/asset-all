@@ -218,6 +218,20 @@ function isCustomUnitCode(code, units) {
   return !!findCustomUnit(code, units);
 }
 
+// Re-express a snapshot-time amount (originally denominated in
+// `snapBase`) in `targetBase` using current rates. Used when the user
+// is viewing a historical snapshot under a base that differs from the
+// one the snapshot was written in — the snapshot's per-item
+// `valueInBase` is in `snapBase`, not the live base.
+function convertSnapshotAmount(rawAmount, snapBase, targetBase, exchangeRates) {
+  if (!exchangeRates || !snapBase || snapBase === targetBase) return rawAmount;
+  if (snapBase === exchangeRates.base) {
+    return rawAmount * (exchangeRates.rates[targetBase] || 1);
+  }
+  const inExBase = rawAmount / (exchangeRates.rates[snapBase] || 1);
+  return inExBase * (exchangeRates.rates[targetBase] || 1);
+}
+
 // Convert `amount` (in `currency`, which may be a custom unit) to `baseCurrency`.
 // Returns NaN-safe number; returns `amount` unchanged when rates are missing.
 function convertToBase(amount, currency, baseCurrency, exchangeRates, customUnits) {
@@ -680,15 +694,9 @@ function renderTotalCard() {
   let total = 0;
 
   if (isHistorical) {
-    // Sum from snapshot items' valueInBase, convert if baseCurrency differs
     const snapBase = viewingSnapshot.baseCurrency;
     const rawTotal = viewingSnapshot.items.reduce((sum, i) => sum + (i.valueInBase ?? i.amount), 0);
-    if (snapBase !== base && exchangeRates) {
-      const toExBase = rawTotal / (exchangeRates.rates[snapBase] || 1);
-      total = toExBase * (exchangeRates.rates[base] || 1);
-    } else {
-      total = rawTotal;
-    }
+    total = convertSnapshotAmount(rawTotal, snapBase, base, exchangeRates);
   } else if (exchangeRates) {
     total = currentItems.reduce((sum, item) => {
       return sum + convertToBase(item.amount, item.currency, base, exchangeRates, state.customUnits);
@@ -806,7 +814,10 @@ function renderAssetList() {
 
     let valueInBase;
     if (isHistorical) {
-      valueInBase = item.valueInBase ?? item.amount;
+      // The snapshot's per-item valueInBase is denominated in the
+      // snapshot's own base, not necessarily the user's current base.
+      const raw = item.valueInBase ?? item.amount;
+      valueInBase = convertSnapshotAmount(raw, viewingSnapshot.baseCurrency, base, exchangeRates);
     } else {
       valueInBase = convertToBase(item.amount, item.currency, base, exchangeRates, unitTable);
     }
@@ -901,18 +912,8 @@ function renderTrendChart() {
   const data = filtered.length > 0 ? filtered : snapshotIndex;
 
   // Convert totals to current base currency
-  function convertTotal(entry) {
-    let total = entry.totalInBase;
-    if (exchangeRates && entry.baseCurrency && entry.baseCurrency !== base) {
-      if (entry.baseCurrency === exchangeRates.base) {
-        total = entry.totalInBase * (exchangeRates.rates[base] || 1);
-      } else {
-        const toExBase = entry.totalInBase / (exchangeRates.rates[entry.baseCurrency] || 1);
-        total = toExBase * (exchangeRates.rates[base] || 1);
-      }
-    }
-    return total;
-  }
+  const convertTotal = entry =>
+    convertSnapshotAmount(entry.totalInBase, entry.baseCurrency, base, exchangeRates);
 
   const labels = [];
   const values = [];
@@ -1862,18 +1863,25 @@ function bindEvents() {
     applyTheme(e.target.value);
   });
 
-  // Settings currency change (live update)
+  // Settings currency change (live update). Fetch rates *first* so
+  // that on failure we leave both `state.config.baseCurrency` and
+  // `state.exchangeRates` consistent — otherwise the next render
+  // would mix a new base with a stale rates table and produce
+  // nonsense numbers until a hard reload.
   document.getElementById('settings-currency').addEventListener('change', async e => {
     const newBase = e.target.value;
-    if (state.config && newBase !== state.config.baseCurrency) {
+    if (!state.config || newBase === state.config.baseCurrency) return;
+    const prevBase = state.config.baseCurrency;
+    try {
+      const newRates = await fxApi.fetchRates(newBase);
       state.config.baseCurrency = newBase;
+      state.exchangeRates = newRates;
       saveConfig(state.config);
-      try {
-        state.exchangeRates = await fxApi.fetchRates(newBase);
-        renderAll();
-      } catch (err) {
-        showToast('汇率更新失败');
-      }
+      saveLocalCache(state.currentItems, state.snapshotIndex, newBase, state.customUnits);
+      renderAll();
+    } catch (err) {
+      e.target.value = prevBase;
+      showToast('汇率更新失败');
     }
   });
 
