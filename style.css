@@ -744,18 +744,36 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
   margin-right: 14px;
   flex-shrink: 0;
   overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: -0.01em;
+  user-select: none;
 }
 
-.asset-logo {
-  width: 28px;
-  height: 28px;
-  background-color: white;
-  border-radius: 12px;
-  object-fit: contain;
+/* Brand-logo tile: white backing fills the whole rounded square so
+   transparent-corner icons sit on white instead of on the dark row. */
+.asset-icon.has-logo {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+/* Lettered fallback tile: solid category color, slight depth so the
+   glyph reads against bright fills like cash green. */
+.asset-icon.is-fallback {
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+}
+
+.asset-logo,
+.asset-icon.has-logo > svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: transparent;
 }
 
 .asset-info {
