@@ -324,14 +324,8 @@
       </div>
       <div class="settings-section">
         <div class="settings-section-title">管理快照</div>
-        <p class="settings-hint">删除的快照会移至 trash 文件夹</p>
-        <div id="snapshot-manage-list" class="snapshot-manage-list">
-          <p class="settings-hint">加载中...</p>
-        </div>
-        <button class="btn-secondary btn-full" id="btn-fix-fx" style="margin-top:12px">
-          <span id="btn-fix-fx-text">矫正历史汇率</span>
-        </button>
-        <p id="fix-fx-progress" class="settings-hint hidden"></p>
+        <p class="settings-hint">查看、删除已有快照，并可矫正历史汇率</p>
+        <button class="btn-secondary btn-full" id="btn-open-snapshots">打开管理面板</button>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">版本更新</div>
@@ -466,6 +460,38 @@
         <span id="btn-history-text">保存快照</span>
       </button>
       <p id="history-error" class="error-text hidden"></p>
+    </div>
+  </div>
+</div>
+
+<!-- Snapshot Management Panel -->
+<div id="panel-snapshots" class="panel hidden">
+  <div class="panel-overlay" id="snapshots-overlay"></div>
+  <div class="panel-sheet">
+    <div class="panel-header">
+      <h2>管理快照</h2>
+      <button class="icon-btn" id="btn-close-snapshots">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="panel-body">
+      <div class="settings-section">
+        <div class="settings-section-title">已有快照</div>
+        <p class="settings-hint">删除的快照会移至 trash 文件夹</p>
+        <div id="snapshot-manage-list" class="snapshot-manage-list">
+          <p class="settings-hint">加载中...</p>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">汇率维护</div>
+        <p class="settings-hint">用最新汇率重算所有历史快照里的本位币换算（如初始化阶段汇率拉取失败时使用）</p>
+        <button class="btn-secondary btn-full" id="btn-fix-fx">
+          <span id="btn-fix-fx-text">矫正历史汇率</span>
+        </button>
+        <p id="fix-fx-progress" class="settings-hint hidden"></p>
+      </div>
     </div>
   </div>
 </div>

@@ -164,6 +164,18 @@ function getInstitutionDomain(name) {
   return null;
 }
 
+// Inline brand marks for institutions where icon.horse returns a
+// padded / low-res favicon and the logo ends up swimming in whitespace.
+// Single-path SVGs from simple-icons (CC0); fill the brand color in
+// directly so the asset row needs no extra recoloring CSS.
+// Keyed by domain so it slots in next to the icon.horse pipeline.
+const INSTITUTION_LOGOS = {
+  'alipay.com': {
+    tileBg: '#fff',
+    svg: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#1677FF" d="M19.695 15.07c3.426 1.158 4.203 1.22 4.203 1.22V3.846c0-2.124-1.705-3.845-3.81-3.845H3.914C1.808.001.102 1.722.102 3.846v16.31c0 2.123 1.706 3.845 3.813 3.845h16.173c2.105 0 3.81-1.722 3.81-3.845v-.157s-6.19-2.602-9.315-4.119c-2.096 2.602-4.8 4.181-7.607 4.181-4.75 0-6.361-4.19-4.112-6.949.49-.602 1.324-1.175 2.617-1.497 2.025-.502 5.247.313 8.266 1.317a16.796 16.796 0 0 0 1.341-3.302H5.781v-.952h4.799V6.975H4.77v-.953h5.81V3.591s0-.409.411-.409h2.347v2.84h5.744v.951h-5.744v1.704h4.69a19.453 19.453 0 0 1-1.986 5.06c1.424.52 2.702 1.011 3.654 1.333m-13.81-2.032c-.596.06-1.71.325-2.321.869-1.83 1.608-.735 4.55 2.968 4.55 2.151 0 4.301-1.388 5.99-3.61-2.403-1.182-4.438-2.028-6.637-1.809"/></svg>',
+  },
+};
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 const state = {
@@ -801,11 +813,24 @@ function renderAssetList() {
   listEl.innerHTML = items.map(item => {
     const category = item.category || '其他';
     const color = CATEGORY_COLORS[category] || CATEGORY_COLORS['其他'];
-    const fallback = CATEGORY_ICONS[category] || '💼';
     const domain = getInstitutionDomain(item.assetName);
-    const iconHtml = domain
-      ? `<img class="asset-logo" src="https://icon.horse/icon/${domain}" alt="" onerror="this.outerHTML='<span>${fallback}</span>'">`
-      : `<span>${fallback}</span>`;
+    const logoOverride = domain ? INSTITUTION_LOGOS[domain] : null;
+    // First grapheme of the name, uppercased — used both as the
+    // fallback tile glyph and as a visual handoff if icon.horse fails.
+    const trimmed = (item.assetName || '').trim();
+    const initial = escHtml((trimmed ? Array.from(trimmed)[0] : '?').toUpperCase());
+    let iconHtml;
+    if (logoOverride) {
+      const tileBg = logoOverride.tileBg || '#fff';
+      iconHtml = `<div class="asset-icon has-logo" style="background:${tileBg};">${logoOverride.svg}</div>`;
+    } else if (domain) {
+      iconHtml = `<div class="asset-icon has-logo">
+           <img class="asset-logo" src="https://icon.horse/icon/${domain}" alt=""
+                data-fallback-color="${color}" data-fallback-initial="${initial}">
+         </div>`;
+    } else {
+      iconHtml = `<div class="asset-icon is-fallback" style="background:${color};">${initial}</div>`;
+    }
 
     // Pick the right custom unit table: snapshots embed their own.
     const unitTable = isHistorical
@@ -824,9 +849,7 @@ function renderAssetList() {
     const showOrig = item.currency !== base;
     return `
       <div class="asset-item ${isHistorical ? 'asset-item-readonly' : ''}" data-id="${item.assetId}">
-        <div class="asset-icon" style="background:${color}22;">
-          ${iconHtml}
-        </div>
+        ${iconHtml}
         <div class="asset-info">
           <div class="asset-name">${escHtml(item.assetName)}</div>
           <div class="asset-meta">${escHtml(category)}${item.notes ? ' · ' + escHtml(item.notes) : ''}</div>
@@ -837,6 +860,22 @@ function renderAssetList() {
         </div>
       </div>`;
   }).join('');
+
+  // Swap to the lettered fallback tile if icon.horse 404s or is blocked.
+  // Catches cached failures too — those fire before any listener bound
+  // purely on `error` would see them.
+  listEl.querySelectorAll('.asset-icon.has-logo .asset-logo').forEach(img => {
+    const swap = () => {
+      const tile = img.parentElement;
+      if (!tile) return;
+      tile.classList.remove('has-logo');
+      tile.classList.add('is-fallback');
+      tile.style.background = img.dataset.fallbackColor;
+      tile.textContent = img.dataset.fallbackInitial;
+    };
+    img.addEventListener('error', swap);
+    if (img.complete && img.naturalWidth === 0) swap();
+  });
 
   // Only bind click-to-edit for current items, not historical view
   if (!isHistorical) {
@@ -1297,14 +1336,21 @@ function openSettings() {
     fxDateEl.textContent = `汇率日期：${state.exchangeRates.date}`;
   }
 
-  // Render snapshot management list
-  renderSnapshotManageList();
   // Render custom units list
   renderCustomUnitsList();
 }
 
 function closeSettings() {
   document.getElementById('panel-settings').classList.add('hidden');
+}
+
+function openSnapshotsPanel() {
+  document.getElementById('panel-snapshots').classList.remove('hidden');
+  renderSnapshotManageList();
+}
+
+function closeSnapshotsPanel() {
+  document.getElementById('panel-snapshots').classList.add('hidden');
 }
 
 // ─── Autocomplete ─────────────────────────────────────────────────────────────
@@ -1965,6 +2011,11 @@ function bindEvents() {
   document.getElementById('history-overlay').addEventListener('click', closeHistoryPanel);
   document.getElementById('btn-history-add-item').addEventListener('click', addHistoryRow);
   document.getElementById('btn-save-history').addEventListener('click', saveHistoricalSnapshot);
+
+  // Snapshot management sub-panel (opens on top of settings)
+  document.getElementById('btn-open-snapshots').addEventListener('click', openSnapshotsPanel);
+  document.getElementById('btn-close-snapshots').addEventListener('click', closeSnapshotsPanel);
+  document.getElementById('snapshots-overlay').addEventListener('click', closeSnapshotsPanel);
 
   // Custom unit modal
   document.getElementById('btn-add-custom-unit').addEventListener('click', () => openUnitModal(null));
